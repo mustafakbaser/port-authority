@@ -8,7 +8,7 @@ import type { ListeningPort, PortExpectation } from '../../core/types.js';
 import { isPathInside, tildify } from '../../core/util/paths.js';
 import { formatAge, parseElapsedTime } from '../../core/util/time.js';
 
-const FOLDER = '/Users/me/api';
+const FOLDER = path.resolve('/Users/me/api');
 
 const listening = (overrides: Partial<ListeningPort> = {}): ListeningPort => ({
   port: 3000,
@@ -109,23 +109,26 @@ describe('ownership', () => {
   const context = { workspaceFolders: [FOLDER], caseInsensitive: false };
 
   it('claims a process whose working directory is inside the workspace', () => {
-    assert.equal(classifyOwnership({ pid: 1, cwd: `${FOLDER}/src` }, context), 'workspace');
+    assert.equal(classifyOwnership({ pid: 1, cwd: path.join(FOLDER, 'src') }, context), 'workspace');
   });
 
   it('marks a process with a known outside directory as foreign', () => {
-    assert.equal(classifyOwnership({ pid: 1, cwd: '/Users/me/other' }, context), 'foreign');
+    assert.equal(classifyOwnership({ pid: 1, cwd: path.resolve('/Users/me/other') }, context), 'foreign');
   });
 
   it('never claims foreign without evidence', () => {
     assert.equal(classifyOwnership({ pid: 1 }, context), 'unknown');
     assert.equal(classifyOwnership({ pid: 1, commandLine: 'node server.js' }, context), 'unknown');
     assert.equal(classifyOwnership(undefined, context), 'unknown');
-    assert.equal(classifyOwnership({ pid: 1, cwd: '/x' }, { ...context, workspaceFolders: [] }), 'unknown');
+    assert.equal(
+      classifyOwnership({ pid: 1, cwd: path.resolve('/x') }, { ...context, workspaceFolders: [] }),
+      'unknown',
+    );
   });
 
   it('falls back to the command line when no working directory is available', () => {
     assert.equal(
-      classifyOwnership({ pid: 1, commandLine: `node ${FOLDER}/server.js` }, context),
+      classifyOwnership({ pid: 1, commandLine: `node ${path.join(FOLDER, 'server.js')}` }, context),
       'workspace',
     );
   });
@@ -149,12 +152,16 @@ describe('buildModel', () => {
   const context = { workspaceFolders: [FOLDER], caseInsensitive: false };
 
   it('labels an expected port held by our own process', () => {
-    const model = buildModel([entry(3000, `${FOLDER}/web`)], [expectation(3000)], context);
+    const model = buildModel([entry(3000, path.join(FOLDER, 'web'))], [expectation(3000)], context);
     assert.equal(model.expectations[0].status, 'held-by-workspace');
   });
 
   it('labels an expected port held by someone else', () => {
-    const model = buildModel([entry(5432, '/Users/me/other')], [expectation(5432, 'DATABASE_URL')], context);
+    const model = buildModel(
+      [entry(5432, path.resolve('/Users/me/other'))],
+      [expectation(5432, 'DATABASE_URL')],
+      context,
+    );
     assert.equal(model.expectations[0].status, 'held-by-foreign');
   });
 
@@ -166,7 +173,10 @@ describe('buildModel', () => {
 
   it('prefers the workspace-owned process when a port has several holders', () => {
     const model = buildModel(
-      [entry(3000, '/elsewhere'), { ...entry(3000, `${FOLDER}/web`), process: { pid: 4242, cwd: `${FOLDER}/web` } }],
+      [
+        entry(3000, path.resolve('/elsewhere')),
+        { ...entry(3000, path.join(FOLDER, 'web')), process: { pid: 4242, cwd: path.join(FOLDER, 'web') } },
+      ],
       [expectation(3000)],
       context,
     );
@@ -175,7 +185,11 @@ describe('buildModel', () => {
   });
 
   it('cross-links expectations into the full port list', () => {
-    const model = buildModel([entry(3000, `${FOLDER}/web`), entry(9999)], [expectation(3000)], context);
+    const model = buildModel(
+      [entry(3000, path.join(FOLDER, 'web')), entry(9999)],
+      [expectation(3000)],
+      context,
+    );
     assert.equal(model.all.length, 2);
     assert.equal(model.all[0].expectation?.port, 3000);
     assert.equal(model.all[1].expectation, undefined);

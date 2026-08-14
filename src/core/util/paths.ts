@@ -51,20 +51,29 @@ export function isPathInside(
  * it would classify every process on the machine as workspace-owned.
  */
 export function mentionsPath(text: string, folder: string, caseInsensitive: boolean): boolean {
-  const needle = path.resolve(folder);
-  const segments = needle.split(/[\\/]/).filter(Boolean);
+  const resolved = path.resolve(folder);
+  const segments = resolved.split(/[\\/]/).filter(Boolean);
   if (segments.length < 2) {
     return false;
   }
 
-  const haystack = caseInsensitive ? text.toLowerCase() : text;
-  const target = caseInsensitive ? needle.toLowerCase() : needle;
+  // Separators are normalised on both sides before comparing. On Windows a command line
+  // can carry either slash — `node C:/Users/me/app/server.js` from a Git Bash or npm
+  // script, `C:\Users\me\app` from the workspace folder — and those describe the same
+  // directory.
+  const canonical = (value: string): string => {
+    const normalised = value.replace(/[\\/]+/g, '/');
+    return caseInsensitive ? normalised.toLowerCase() : normalised;
+  };
+
+  const haystack = canonical(text);
+  const target = canonical(resolved);
 
   let index = haystack.indexOf(target);
   while (index >= 0) {
     // The match must end at a path boundary, so `/app` does not match inside `/app-backup`.
     const next = haystack[index + target.length];
-    if (next === undefined || next === '/' || next === '\\' || next === ' ' || next === '"' || next === "'") {
+    if (next === undefined || next === '/' || next === ' ' || next === '"' || next === "'") {
       return true;
     }
     index = haystack.indexOf(target, index + 1);

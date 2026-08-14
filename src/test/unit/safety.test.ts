@@ -4,6 +4,7 @@ import { evaluateKill, type KillGuardContext } from '../../core/process/guard.js
 import { describeProcessBriefly, isSameProcess } from '../../core/process/identity.js';
 import { classifyOwnershipDetailed } from '../../core/ownership.js';
 import { redact } from '../../core/util/redact.js';
+import * as path from 'node:path';
 import { mentionsPath } from '../../core/util/paths.js';
 import type { ProcessInfo } from '../../core/types.js';
 
@@ -90,10 +91,17 @@ describe('process identity', () => {
 });
 
 describe('ownership evidence', () => {
-  const context = { workspaceFolders: ['/Users/me/app'], caseInsensitive: false };
+  // Absolute paths go through `path.resolve` so the fixtures are native everywhere. A
+  // POSIX literal silently becomes C:\\Users\\me\\app on Windows while the command line in
+  // the same assertion keeps its forward slashes, and the test then fails for a reason
+  // that has nothing to do with the code under test.
+  const APP = path.resolve('/Users/me/app');
+  const APP_BACKUP = path.resolve('/Users/me/app-backup');
+  const APPLICATION = path.resolve('/Users/me/application');
+  const context = { workspaceFolders: [APP], caseInsensitive: false };
 
   it('reports the working directory as direct evidence', () => {
-    assert.deepEqual(classifyOwnershipDetailed({ pid: 1, cwd: '/Users/me/app/web' }, context), {
+    assert.deepEqual(classifyOwnershipDetailed({ pid: 1, cwd: path.join(APP, 'web') }, context), {
       ownership: 'workspace',
       basis: 'cwd',
     });
@@ -102,7 +110,7 @@ describe('ownership evidence', () => {
   /** The bug this replaced classified a sibling checkout as workspace-owned. */
   it('does not match a sibling directory that merely shares a prefix', () => {
     const verdict = classifyOwnershipDetailed(
-      { pid: 1, commandLine: 'node /Users/me/app-backup/server.js' },
+      { pid: 1, commandLine: `node ${path.join(APP_BACKUP, 'server.js')}` },
       context,
     );
     assert.equal(verdict.ownership, 'unknown');
@@ -110,26 +118,32 @@ describe('ownership evidence', () => {
 
   it('marks a command-line match as indirect evidence', () => {
     assert.deepEqual(
-      classifyOwnershipDetailed({ pid: 1, commandLine: 'node /Users/me/app/server.js' }, context),
+      classifyOwnershipDetailed({ pid: 1, commandLine: `node ${path.join(APP, 'server.js')}` }, context),
       { ownership: 'workspace', basis: 'commandLine' },
     );
   });
 
   it('never lets a shallow folder claim every process on the machine', () => {
-    assert.equal(mentionsPath('/usr/sbin/sshd -D', '/', false), false);
+    assert.equal(mentionsPath('/usr/sbin/sshd -D', path.sep, false), false);
     assert.equal(
       classifyOwnershipDetailed(
         { pid: 1, commandLine: '/usr/sbin/sshd -D' },
-        { workspaceFolders: ['/'], caseInsensitive: false },
+        { workspaceFolders: [path.sep], caseInsensitive: false },
       ).ownership,
       'unknown',
     );
   });
 
   it('accepts a folder mentioned at a path boundary', () => {
-    assert.equal(mentionsPath('node /Users/me/app/server.js', '/Users/me/app', false), true);
-    assert.equal(mentionsPath('cd "/Users/me/app" && npm run dev', '/Users/me/app', false), true);
-    assert.equal(mentionsPath('node /Users/me/application/x.js', '/Users/me/app', false), false);
+    assert.equal(mentionsPath(`node ${path.join(APP, 'server.js')}`, APP, false), true);
+    assert.equal(mentionsPath(`cd "${APP}" && npm run dev`, APP, false), true);
+    assert.equal(mentionsPath(`node ${path.join(APPLICATION, 'x.js')}`, APP, false), false);
+  });
+
+  it('matches a path written with the other separator', () => {
+    // Real Windows command lines mix both, depending on which shell launched the process.
+    const withSlashes = APP.split(path.sep).join('/');
+    assert.equal(mentionsPath(`node ${withSlashes}/server.js`, APP, false), true);
   });
 });
 
