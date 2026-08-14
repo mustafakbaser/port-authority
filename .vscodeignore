@@ -12,6 +12,7 @@ assets/**
 eslint.config.mjs
 .vscode-test.mjs
 .gitignore
+.gitmessage
 .editorconfig
 **/.DS_Store
 
