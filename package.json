@@ -1,0 +1,390 @@
+{
+  "name": "port-authority",
+  "displayName": "Port Authority",
+  "description": "Find out which process is holding a port, and stop it safely. Workspace-aware, with automatic EADDRINUSE detection.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "mkbaser",
+  "author": {
+    "name": "Mustafa Kürşad Başer"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mustafakbaser/port-authority.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mustafakbaser/port-authority/issues"
+  },
+  "engines": {
+    "vscode": "^1.93.0",
+    "node": ">=20"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "port",
+    "EADDRINUSE",
+    "kill port",
+    "localhost",
+    "process"
+  ],
+  "icon": "media/icon.png",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Port listing works in restricted mode. Reading workspace files to infer expected ports, and workspace-level terminate settings, are disabled until you trust the folder.",
+      "restrictedConfigurations": [
+        "portAuthority.workspaceExpectations.enabled",
+        "portAuthority.workspaceExpectations.additionalPorts",
+        "portAuthority.terminate.confirmation",
+        "portAuthority.terminate.gracePeriodMs",
+        "portAuthority.protectedProcessNames"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Port Authority inspects operating system processes and needs a real file system and process table."
+    }
+  },
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "portAuthority",
+          "title": "Port Authority",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "portAuthority": [
+        {
+          "id": "portAuthority.ports",
+          "name": "Ports",
+          "icon": "media/icon.svg",
+          "contextualTitle": "Port Authority"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "portAuthority.ports",
+        "contents": "No listening TCP ports were found on this machine.\n[Refresh](command:portAuthority.refresh)\n\nYou can drag this view to the bottom panel if you prefer it there."
+      }
+    ],
+    "commands": [
+      {
+        "command": "portAuthority.refresh",
+        "title": "Refresh",
+        "category": "Port Authority",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "portAuthority.terminate",
+        "title": "Terminate Process…",
+        "category": "Port Authority",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "portAuthority.terminateByPort",
+        "title": "Terminate Process on Port…",
+        "category": "Port Authority"
+      },
+      {
+        "command": "portAuthority.openInBrowser",
+        "title": "Open in Browser",
+        "category": "Port Authority",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "portAuthority.copyPid",
+        "title": "Copy PID",
+        "category": "Port Authority"
+      },
+      {
+        "command": "portAuthority.copyCommandLine",
+        "title": "Copy Command Line",
+        "category": "Port Authority"
+      },
+      {
+        "command": "portAuthority.ignorePort",
+        "title": "Ignore This Port",
+        "category": "Port Authority"
+      },
+      {
+        "command": "portAuthority.clearIgnoredPorts",
+        "title": "Clear Ignored Ports",
+        "category": "Port Authority"
+      },
+      {
+        "command": "portAuthority.showLog",
+        "title": "Show Log",
+        "category": "Port Authority"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        {
+          "command": "portAuthority.terminate",
+          "when": "false"
+        },
+        {
+          "command": "portAuthority.openInBrowser",
+          "when": "false"
+        },
+        {
+          "command": "portAuthority.copyPid",
+          "when": "false"
+        },
+        {
+          "command": "portAuthority.copyCommandLine",
+          "when": "false"
+        },
+        {
+          "command": "portAuthority.ignorePort",
+          "when": "false"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "portAuthority.refresh",
+          "when": "view == portAuthority.ports",
+          "group": "navigation@1"
+        },
+        {
+          "command": "portAuthority.clearIgnoredPorts",
+          "when": "view == portAuthority.ports && portAuthority.hasIgnoredPorts",
+          "group": "1_manage@1"
+        },
+        {
+          "command": "portAuthority.showLog",
+          "when": "view == portAuthority.ports",
+          "group": "9_diagnostics@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "portAuthority.openInBrowser",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "group": "inline@1"
+        },
+        {
+          "command": "portAuthority.terminate",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/ && viewItem =~ /:killable/",
+          "group": "inline@2"
+        },
+        {
+          "command": "portAuthority.terminate",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/ && viewItem =~ /:killable/",
+          "group": "1_actions@1"
+        },
+        {
+          "command": "portAuthority.openInBrowser",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "group": "1_actions@2"
+        },
+        {
+          "command": "portAuthority.copyPid",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "group": "2_copy@1"
+        },
+        {
+          "command": "portAuthority.copyCommandLine",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "group": "2_copy@2"
+        },
+        {
+          "command": "portAuthority.ignorePort",
+          "when": "view == portAuthority.ports && viewItem =~ /^port\\./",
+          "group": "3_filter@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Port Authority",
+      "properties": {
+        "portAuthority.autoRefresh.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Periodically rescan listening ports. Scanning only runs while the Localhost panel is visible or the status bar item is enabled, and pauses when the window loses focus.",
+          "scope": "application"
+        },
+        "portAuthority.autoRefresh.intervalSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "maximum": 600,
+          "description": "Seconds between automatic rescans while the Localhost panel is visible.",
+          "scope": "application"
+        },
+        "portAuthority.showAllInterfaces": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show ports bound to a specific non-loopback interface as well. When off, only `localhost` and wildcard (`0.0.0.0` / `::`) binds are listed.",
+          "scope": "application"
+        },
+        "portAuthority.portRange": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "minItems": 2,
+          "maxItems": 2,
+          "default": [
+            1,
+            65535
+          ],
+          "description": "Only list ports inside this inclusive [min, max] range.",
+          "scope": "application"
+        },
+        "portAuthority.ignorePorts": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "default": [],
+          "description": "Ports that are never listed and never trigger a notification.",
+          "scope": "application"
+        },
+        "portAuthority.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a status bar item summarising the ports this workspace expects.",
+          "scope": "application"
+        },
+        "portAuthority.workspaceExpectations.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Infer the ports this workspace expects from `package.json` scripts and `.env` files. Requires a trusted workspace.",
+          "scope": "resource"
+        },
+        "portAuthority.workspaceExpectations.additionalPorts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "port"
+            ],
+            "properties": {
+              "port": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "default": [],
+          "description": "Extra ports to treat as expected by this workspace.",
+          "scope": "resource"
+        },
+        "portAuthority.eaddrinuse.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Watch terminal and debug console output for `EADDRINUSE` / \"address already in use\" errors and offer to resolve them. Requires shell integration for terminal detection.",
+          "scope": "application"
+        },
+        "portAuthority.eaddrinuse.watchDebugConsole": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also watch debug session output for port conflicts.",
+          "scope": "application"
+        },
+        "portAuthority.eaddrinuse.cooldownSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 5,
+          "maximum": 3600,
+          "description": "Minimum time before the same port can raise a port-conflict notification again.",
+          "scope": "application"
+        },
+        "portAuthority.terminate.confirmation": {
+          "type": "string",
+          "enum": [
+            "always",
+            "unexpectedOnly"
+          ],
+          "enumDescriptions": [
+            "Always ask before terminating a process.",
+            "Ask only for processes that are not an expected port of the current workspace. Expected, workspace-owned processes are terminated after a non-modal warning."
+          ],
+          "default": "always",
+          "description": "When to require an explicit confirmation before terminating a process.",
+          "scope": "resource"
+        },
+        "portAuthority.terminate.gracePeriodMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 0,
+          "maximum": 30000,
+          "markdownDescription": "How long to wait for a graceful shutdown (`SIGTERM` / `taskkill`) before offering to force-kill.",
+          "scope": "resource"
+        },
+        "portAuthority.protectedProcessNames": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional process names that must never be terminated by this extension.",
+          "scope": "resource"
+        },
+        "portAuthority.scan.timeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 500,
+          "maximum": 60000,
+          "description": "Timeout for a single port scan.",
+          "scope": "application"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run check && npm run bundle -- --production",
+    "bundle": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "compile": "tsc -p ./tsconfig.json",
+    "compile:test": "tsc -p ./tsconfig.test.json",
+    "check": "npm run lint && npm run typecheck && npm run test:unit",
+    "typecheck": "tsc -p ./tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "test:unit": "npm run compile:test && node scripts/run-unit-tests.mjs",
+    "test:integration": "npm run compile:test && npm run bundle && vscode-test",
+    "test": "npm run test:unit && npm run test:integration",
+    "package": "vsce package --out port-authority.vsix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "@types/mocha": "^10.0.7",
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.93.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.9.0",
+    "typescript": "^5.5.4"
+  },
+  "preview": true,
+  "pricing": "Free",
+  "qna": "marketplace",
+  "homepage": "https://github.com/mustafakbaser/port-authority#readme"
+}

@@ -1,0 +1,11 @@
+{
+  "name": "sample-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite --port 51990",
+    "api": "PORT=51991 node server.js",
+    "build": "tsc -p tsconfig.json",
+    "clean": "mkdir -p 1234 && rimraf dist"
+  }
+}
