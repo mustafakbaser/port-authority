@@ -1,8 +1,26 @@
-# Port Authority
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mustafakbaser/port-authority/main/media/icon.png" width="84" alt="">
+</p>
 
-Something is already listening on port 3000. Port Authority tells you what it is, where it was started from, and how long it has been running, then lets you stop it without leaving the editor.
+<h1 align="center">Port Authority</h1>
 
-![The Port Authority view in the sidebar](https://raw.githubusercontent.com/mustafakbaser/port-authority/main/media/screenshot.png)
+<p align="center">
+  Something is already listening on port 3000.<br>
+  Port Authority tells you what it is, where it was started from,<br>
+  and lets you stop it safely.
+</p>
+
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=mkbaser.port-authority"><img src="https://img.shields.io/visual-studio-marketplace/v/mkbaser.port-authority?style=flat-square&amp;label=marketplace&amp;color=1f7fc4" alt="Marketplace version"></a>
+  <a href="https://github.com/mustafakbaser/port-authority/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/mustafakbaser/port-authority/ci.yml?branch=main&amp;style=flat-square&amp;label=ci" alt="CI status"></a>
+  <a href="https://github.com/mustafakbaser/port-authority/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT licence"></a>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mustafakbaser/port-authority/main/media/screenshot.png" width="340" alt="The Port Authority view in the sidebar, showing the ports this workspace expects alongside every port listening on the machine">
+</p>
+
+---
 
 ## Why I wrote it
 
@@ -12,6 +30,8 @@ There are already a dozen extensions that kill a port. They all solve the last f
 
 So this one is built around identification. Killing the process is the easy part and comes last.
 
+---
+
 ## What it does
 
 ### It knows which ports your project expects
@@ -19,13 +39,14 @@ So this one is built around identification. Killing the process is the easy part
 Port Authority reads the `scripts` in your `package.json` and your local `.env` files, and works out which ports this workspace is supposed to be using. Those get their own section at the top of the view:
 
 ```
-This workspace (2/3 up)
-  ● 3000  dev (next)      node (91204) · ~/proj/web · 2m ago · this workspace
-  ⚠ 5432  DATABASE_URL    postgres (884) · ~/other-proj · FOREIGN
+This workspace (2/4 up)
+  ○ 4000  api (node)      not running
+  ● 5173  dev (vite)      node (65028) · ~/shop-web · this workspace
+  ⚠ 5432  DATABASE_URL    node (66437) · ~/legacy-api · FOREIGN
   ○ 6379  REDIS_PORT      not running
 ```
 
-That middle row is the interesting one. Port 5432 is up, but it belongs to a different project you left running last week. Without that distinction, "the port is in use" and "the port is in use by the right thing" look identical.
+That third row is the interesting one. Port 5432 is up, but it belongs to a different project you left running last week. Without that distinction, "the port is in use" and "the port is in use by the right thing" look identical.
 
 Every expectation is traceable. Hover a row and it will tell you it came from `scripts.dev` in `apps/web/package.json`, not just that it exists.
 
@@ -56,6 +77,8 @@ Some processes are refused outright and no setting changes that: VS Code itself 
 
 Everything gets written to the *Port Authority* output channel, through a filter that strips credentials out of connection strings and token arguments.
 
+---
+
 ## Installing
 
 From the Marketplace, or:
@@ -70,23 +93,25 @@ Every feature can be switched off on its own.
 
 | Setting | Default | |
 |---|---|---|
-| `portAuthority.autoRefresh.enabled` | `true` | Periodic rescans. Only while the view is open or the status bar item is on, and only while the window has focus. |
-| `portAuthority.autoRefresh.intervalSeconds` | `10` | How often, while the view is visible. The status bar on its own never polls faster than every 30 seconds. |
-| `portAuthority.showAllInterfaces` | `false` | Also list ports bound to a specific LAN address. |
-| `portAuthority.portRange` | `[1, 65535]` | Restrict the listing to a range. |
-| `portAuthority.ignorePorts` | `[]` | Ports that are never listed and never notified about. |
-| `portAuthority.statusBar.enabled` | `true` | The `2/3` summary of expected ports. |
-| `portAuthority.workspaceExpectations.enabled` | `true` | Read `package.json` and `.env` to infer expected ports. |
-| `portAuthority.workspaceExpectations.additionalPorts` | `[]` | Extra ports, for example `[{ "port": 9229, "label": "debugger" }]`. |
-| `portAuthority.eaddrinuse.enabled` | `true` | Watch terminal output for port conflicts. |
-| `portAuthority.eaddrinuse.watchDebugConsole` | `true` | Watch debug session output too. |
-| `portAuthority.eaddrinuse.cooldownSeconds` | `60` | Minimum gap before the same port notifies again. |
-| `portAuthority.terminate.confirmation` | `"always"` | `"unexpectedOnly"` skips the dialog only for a normal risk process holding a port this workspace expects and provably owns. |
-| `portAuthority.terminate.gracePeriodMs` | `3000` | How long to wait for a graceful exit before offering to force. |
-| `portAuthority.protectedProcessNames` | `[]` | Names this extension must never terminate. |
-| `portAuthority.scan.timeoutMs` | `5000` | Timeout for one scan. |
+| `portAuthority.autoRefresh.enabled` | `true` | Periodic rescans, only while the view is open or the status bar item is on, and only while the window has focus |
+| `portAuthority.autoRefresh.intervalSeconds` | `10` | How often, while the view is visible. The status bar alone never polls faster than every 30 seconds |
+| `portAuthority.showAllInterfaces` | `false` | Also list ports bound to a specific LAN address |
+| `portAuthority.portRange` | `[1, 65535]` | Restrict the listing to a range |
+| `portAuthority.ignorePorts` | `[]` | Ports that are never listed and never notified about |
+| `portAuthority.statusBar.enabled` | `true` | The `2/4` summary of expected ports |
+| `portAuthority.workspaceExpectations.enabled` | `true` | Read `package.json` and `.env` to infer expected ports |
+| `portAuthority.workspaceExpectations.additionalPorts` | `[]` | Extra ports, e.g. `[{ "port": 9229, "label": "debugger" }]` |
+| `portAuthority.eaddrinuse.enabled` | `true` | Watch terminal output for port conflicts |
+| `portAuthority.eaddrinuse.watchDebugConsole` | `true` | Watch debug session output too |
+| `portAuthority.eaddrinuse.cooldownSeconds` | `60` | Minimum gap before the same port notifies again |
+| `portAuthority.terminate.confirmation` | `"always"` | `"unexpectedOnly"` skips the dialog only for a normal risk process on a port this workspace expects and provably owns |
+| `portAuthority.terminate.gracePeriodMs` | `3000` | How long to wait for a graceful exit before offering to force |
+| `portAuthority.protectedProcessNames` | `[]` | Names this extension must never terminate |
+| `portAuthority.scan.timeoutMs` | `5000` | Timeout for one scan |
 
 In a multi root workspace the safest value wins: if any folder asks for confirmation it becomes mandatory, the longest grace period applies, and protected names are combined.
+
+---
 
 ## How ports are read
 
@@ -104,7 +129,11 @@ Over Remote SSH, in WSL or in a devcontainer, the extension runs where your work
 
 No telemetry. No network requests. The only outbound action anywhere in the extension is `Open in Browser`, and you have to click it.
 
-`.env` files are read to find port numbers. Their values never leave the inference code, and nothing that could carry a credential is written to the log. In Restricted Mode no workspace file is read at all, and a port conflict notification offers no terminate button, because the terminal output driving it is controlled by the repository you have not trusted yet.
+`.env` files are read to find port numbers, and only `.env`, `.env.local` and similar local variants, never `.env.production` or `.env.example`. Their values never leave the inference code. Everything written to the log passes through a redaction filter that strips credentials out of connection strings, `--token=` style arguments and `Bearer` headers.
+
+In Restricted Mode no workspace file is read at all, and a port conflict notification offers no terminate button, because the terminal output driving it comes from a repository you have not trusted yet.
+
+---
 
 ## What it does not do yet
 
@@ -113,6 +142,8 @@ No telemetry. No network requests. The only outbound action anywhere in the exte
 - Without elevation, macOS and Linux hide the details of processes you do not own. The port is still listed, with a row explaining why the owner is blank.
 - Windows does not expose another process's working directory cheaply, so ownership there falls back to matching the workspace path inside the command line. That is shown as indirect evidence and is never enough to skip a confirmation.
 - UDP is not listed. Every `EADDRINUSE` worth chasing is TCP.
+
+---
 
 ## Development
 
@@ -126,8 +157,8 @@ npm run package    # builds port-authority.vsix
 
 `src/core` is plain TypeScript with no `vscode` import: the parsers, the port inference rules, the ownership logic and the kill guard all live there and are tested directly. `src/node` does the two side effects, running a command and reading the file system. `src/vscode` is the adapter. A lint rule keeps the boundary honest.
 
-If you want to work on it, see [CONTRIBUTING.md](CONTRIBUTING.md).
+If you want to work on it, see [CONTRIBUTING.md](https://github.com/mustafakbaser/port-authority/blob/main/CONTRIBUTING.md).
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/mustafakbaser/port-authority/blob/main/LICENSE) © Mustafa Kürşad Başer
