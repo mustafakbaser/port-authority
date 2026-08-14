@@ -10,6 +10,32 @@ Planned for 0.2:
 - Probe open ports over HTTP so they can be labelled by whatever answers.
 - Find dev servers still running from projects you closed days ago.
 
+## 0.1.1
+
+### Fixed
+
+Ownership detection on Windows. A command line carries whichever slash the shell that
+launched the process used, so `node C:/Users/me/app/server.js` never matched a workspace
+folder that arrived as `C:\Users\me\app`. Both sides are normalised before comparing now,
+which means a process started from your project is recognised as yours rather than
+falling back to "owner unknown".
+
+`.DS_Store` was being packaged into the extension. vsce applies every negation rule after
+all ignore rules, wherever they appear in `.vscodeignore`, so `!media/**` was quietly
+re-including the files Finder leaves in that folder.
+
+### Changed
+
+The readme now leads with a header block and a screenshot sized to fit, rather than a
+646 pixel image that pushed the explanation below the fold on the marketplace listing.
+
+### Internal
+
+Unit tests built their fixtures from POSIX path literals, which resolve to a
+drive-prefixed path on Windows while the command line in the same assertion kept its
+forward slashes. That was the only job failing in CI on that platform, and it was hiding
+the ownership bug above.
+
 ## 0.1.0
 
 First release.
