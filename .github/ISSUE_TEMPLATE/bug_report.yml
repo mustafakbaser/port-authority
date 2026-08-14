@@ -1,0 +1,73 @@
+name: Bug report
+description: Something is wrong with a port listing, a notification, or terminating a process
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Start a server on port 3000
+        2. Open the Port Authority view
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: macOS 15.2 (Apple Silicon) / Ubuntu 24.04 / Windows 11
+    validations:
+      required: true
+
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Where is VS Code running
+      options:
+        - Locally
+        - Remote SSH
+        - Devcontainer
+        - WSL
+        - Codespaces
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: VS Code and extension version
+      placeholder: VS Code 1.133.0, Port Authority 0.1.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: >
+        Open the Output panel, choose "Port Authority", set the level to Debug, reproduce
+        the problem, and paste the log here. It never contains credentials.
+      render: text
+
+  - type: textarea
+    id: platform-output
+    attributes:
+      label: What your system reports
+      description: >
+        Only if a port is missing or shown incorrectly. Run the command for your platform
+        and paste the relevant lines.
+        macOS: lsof -nP -iTCP -sTCP:LISTEN
+        Linux: ss -ltnp
+        Windows: Get-NetTCPConnection -State Listen
+      render: text

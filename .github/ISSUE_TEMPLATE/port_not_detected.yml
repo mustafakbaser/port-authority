@@ -1,0 +1,46 @@
+name: A port my project uses is not detected
+description: The workspace section is missing a port, or lists one that should not be there
+labels: ["inference"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        The inference rules are narrow on purpose. A port that is invented is worse than
+        one that is missed, so please include the exact declaration rather than a
+        description of it.
+
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Which way is it wrong
+      options:
+        - A port I expect is missing
+        - A port is listed that should not be
+    validations:
+      required: true
+
+  - type: textarea
+    id: declaration
+    attributes:
+      label: How the port is declared
+      description: The exact line from your package.json script, .env file or config.
+      placeholder: '"dev": "concurrently \"vite --port 5173\" \"tsx watch server.ts\""'
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: port
+    attributes:
+      label: The port number
+    validations:
+      required: true
+
+  - type: textarea
+    id: false-positive-check
+    attributes:
+      label: Could a similar line mean something else
+      description: >
+        If you are proposing a new rule, this is the important question. Is there a
+        common command that looks like this but is not declaring a port? `docker run -p
+        8080:80` is the classic example.

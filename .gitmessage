@@ -1,0 +1,17 @@
+# <type>(<scope>): <subject, imperative, no full stop, ~72 chars>
+
+# Why this change was needed. The diff already shows what changed.
+
+# Closes #
+
+# feat     new behaviour a user can see
+# fix      a defect in shipped behaviour
+# docs     readme, contributing guide, changelog, comments
+# test     tests only
+# refactor no behaviour change
+# perf     a measurable performance change
+# build    bundling, packaging, tsconfig, dependencies
+# ci       workflows and automation
+# chore    anything else that touches no shipped behaviour
+#
+# scopes: scanner guard terminate inference eaddrinuse tree config deps
