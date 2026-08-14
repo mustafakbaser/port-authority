@@ -1,23 +1,24 @@
+# vsce applies every `!` rule after all ignore rules, regardless of where they appear in
+# this file. A blanket negation such as `!media/**` therefore re-includes anything in that
+# folder, including the .DS_Store files Finder leaves behind. Nothing here is negated for
+# that reason: media/ and dist/extension.js are simply never excluded in the first place.
+
 .vscode/**
 .github/**
 src/**
 out/**
 node_modules/**
+assets/**
+scripts/**
 **/*.ts
 **/*.map
 **/tsconfig*.json
 esbuild.mjs
-scripts/**
-assets/**
 eslint.config.mjs
 .vscode-test.mjs
 .gitignore
 .gitmessage
 .editorconfig
+CONTRIBUTING.md
 **/.DS_Store
-
-!dist/extension.js
-!media/**
-!README.md
-!CHANGELOG.md
-!LICENSE
+**/Thumbs.db
