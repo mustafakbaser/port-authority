@@ -25,6 +25,7 @@ suite('Port Authority', () => {
       'portAuthority.refresh',
       'portAuthority.terminate',
       'portAuthority.terminateByPort',
+      'portAuthority.stopContainer',
       'portAuthority.openInBrowser',
       'portAuthority.copyPid',
       'portAuthority.copyCommandLine',
@@ -45,6 +46,7 @@ suite('Port Authority', () => {
     assert.equal(config.get('eaddrinuse.enabled'), true);
     // The destructive path must default to asking, whatever else changes.
     assert.equal(config.get('terminate.confirmation'), 'always');
+    assert.equal(config.get('docker.enabled'), true);
   });
 
   test('finds a port that is genuinely listening on this machine', async function () {

@@ -99,6 +99,12 @@
         "category": "Port Authority"
       },
       {
+        "command": "portAuthority.stopContainer",
+        "title": "Stop Container…",
+        "category": "Port Authority",
+        "icon": "$(debug-stop)"
+      },
+      {
         "command": "portAuthority.openInBrowser",
         "title": "Open in Browser",
         "category": "Port Authority",
@@ -151,6 +157,10 @@
         {
           "command": "portAuthority.ignorePort",
           "when": "false"
+        },
+        {
+          "command": "portAuthority.stopContainer",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -178,12 +188,17 @@
         },
         {
           "command": "portAuthority.terminate",
-          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/ && viewItem =~ /:killable/",
+          "when": "view == portAuthority.ports && viewItem =~ /:killable/",
+          "group": "inline@2"
+        },
+        {
+          "command": "portAuthority.stopContainer",
+          "when": "view == portAuthority.ports && viewItem =~ /:container/",
           "group": "inline@2"
         },
         {
           "command": "portAuthority.terminate",
-          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/ && viewItem =~ /:killable/",
+          "when": "view == portAuthority.ports && viewItem =~ /:killable/",
           "group": "1_actions@1"
         },
         {
@@ -205,6 +220,11 @@
           "command": "portAuthority.ignorePort",
           "when": "view == portAuthority.ports && viewItem =~ /^port\\./",
           "group": "3_filter@1"
+        },
+        {
+          "command": "portAuthority.stopContainer",
+          "when": "view == portAuthority.ports && viewItem =~ /:container/",
+          "group": "1_actions@1"
         }
       ]
     },
@@ -350,6 +370,20 @@
           "minimum": 500,
           "maximum": 60000,
           "description": "Timeout for a single port scan.",
+          "scope": "application"
+        },
+        "portAuthority.docker.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Ask the local Docker daemon which container publishes each port, so a container shows up by name instead of as the Docker backend process. Only a local socket or named pipe is used; a remote `DOCKER_HOST` is refused.",
+          "scope": "application"
+        },
+        "portAuthority.docker.timeoutMs": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 250,
+          "maximum": 30000,
+          "description": "Timeout for a single request to the Docker daemon.",
           "scope": "application"
         }
       }

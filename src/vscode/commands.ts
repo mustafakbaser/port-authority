@@ -1,20 +1,22 @@
 import * as vscode from 'vscode';
-import { entryOf, isActionableNode, portOf, type PortTreeDataProvider } from './tree.js';
+import { containerOf, entryOf, isActionableNode, portOf, type PortTreeDataProvider } from './tree.js';
 import type { IgnoredPortStore } from './ignoredPorts.js';
 import type { Logger } from './logger.js';
 import type { PortService } from './portService.js';
+import type { StopContainerFlow } from './stopContainerFlow.js';
 import type { TerminateFlow } from './terminateFlow.js';
 
 export interface CommandDependencies {
   readonly ports: PortService;
   readonly tree: PortTreeDataProvider;
   readonly terminateFlow: TerminateFlow;
+  readonly stopContainerFlow: StopContainerFlow;
   readonly ignored: IgnoredPortStore;
   readonly logger: Logger;
 }
 
 export function registerCommands(deps: CommandDependencies): vscode.Disposable[] {
-  const { ports, tree, terminateFlow, ignored, logger } = deps;
+  const { ports, tree, terminateFlow, stopContainerFlow, ignored, logger } = deps;
 
   const register = (id: string, handler: (...args: unknown[]) => unknown): vscode.Disposable =>
     vscode.commands.registerCommand(id, handler);
@@ -24,8 +26,29 @@ export function registerCommands(deps: CommandDependencies): vscode.Disposable[]
 
     register('portAuthority.showLog', () => logger.show()),
 
+    register('portAuthority.stopContainer', async (node: unknown) => {
+      if (!isActionableNode(node)) {
+        return;
+      }
+      const container = containerOf(node);
+      if (!container) {
+        void vscode.window.showWarningMessage('This port is not published by a container.');
+        return;
+      }
+      await stopContainerFlow.run({ port: portOf(node), containerId: container.id });
+    }),
+
     register('portAuthority.terminate', async (node: unknown) => {
       if (!isActionableNode(node)) {
+        return;
+      }
+      const container = containerOf(node);
+      if (container) {
+        // The process behind a container port is the Docker daemon, which holds every
+        // other published port too. Signalling it is never what the user meant.
+        void vscode.window.showWarningMessage(
+          `Port ${portOf(node)} is published by the container "${container.name}". Use "Stop Container" instead; terminating the process would stop the Docker daemon and every container with it.`,
+        );
         return;
       }
       const entry = entryOf(node);
@@ -47,16 +70,29 @@ export function registerCommands(deps: CommandDependencies): vscode.Disposable[]
         void vscode.window.showInformationMessage('No listening port with an identifiable process was found.');
         return;
       }
+      // The tree model already knows which ports belong to containers, and picking one
+      // here has to take the same route as picking it in the tree.
+      const rows = tree.model().all;
       const picked = await vscode.window.showQuickPick(
-        killable.map((entry) => ({
-          label: `$(plug) ${entry.port}`,
-          description: `${entry.process?.name ?? 'process'} (PID ${entry.process?.pid})`,
-          detail: entry.process?.cwd ?? entry.process?.executablePath,
-          entry,
-        })),
-        { placeHolder: 'Select the port whose process should be terminated', matchOnDescription: true },
+        killable.map((entry) => {
+          const container = rows.find((row) => row.entry === entry)?.container;
+          return {
+            label: `$(${container ? 'package' : 'plug'}) ${entry.port}`,
+            description: container
+              ? `container ${container.name} · ${container.image}`
+              : `${entry.process?.name ?? 'process'} (PID ${entry.process?.pid})`,
+            detail: container?.compose?.workingDir ?? entry.process?.cwd ?? entry.process?.executablePath,
+            entry,
+            container,
+          };
+        }),
+        { placeHolder: 'Select the port to free', matchOnDescription: true },
       );
       if (!picked) {
+        return;
+      }
+      if (picked.container) {
+        await stopContainerFlow.run({ port: picked.entry.port, containerId: picked.container.id });
         return;
       }
       await terminateFlow.run({

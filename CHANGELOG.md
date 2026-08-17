@@ -4,9 +4,30 @@ Notable changes, newest first. This project follows [semantic versioning](https:
 
 ## Unreleased
 
-Planned for 0.2:
+### Added
 
-- Map published container ports to the Docker container that owns them, instead of showing the Docker backend process.
+Container awareness. Ports published by Docker are shown as the container that publishes
+them, with its image and uptime, instead of several identical rows of the daemon process.
+Ownership uses the Compose project directory, so a container started by a compose file in
+one of your open folders is recognised as yours by the same containment rule that applies
+to a process working directory.
+
+Container rows offer **Stop Container** rather than terminate. The process behind them is
+the Docker daemon, which holds every other published port, so signalling it is refused.
+Stopping a container is reversible and the confirmation says so instead of borrowing the
+irreversible warning used for processes.
+
+Only a local socket or named pipe is used, and a remote `DOCKER_HOST` is refused. The
+extension promises it makes no network requests, and a remote daemon does not own this
+machine's ports.
+
+### Fixed
+
+Ports published by a container used to be labelled FOREIGN on the strength of the Docker
+daemon's own working directory, which says nothing about the container.
+
+### Still planned for 0.2
+
 - Probe open ports over HTTP so they can be labelled by whatever answers.
 - Find dev servers still running from projects you closed days ago.
 
