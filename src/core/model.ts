@@ -1,8 +1,7 @@
 import {
   classifyContainerOwnership,
-  findContainerForHostPort,
+  containerForScannedPort,
   indexContainersByHostPort,
-  isDockerProcess,
 } from './docker/match.js';
 import type { ContainerInfo } from './docker/types.js';
 import { classifyOwnershipDetailed, type OwnershipBasis, type OwnershipContext } from './ownership.js';
@@ -62,29 +61,15 @@ export function buildModel(
 ): PortModel {
   const containerIndex = containers.length > 0 ? indexContainersByHostPort(containers) : undefined;
 
-  /**
-   * A container is only attached when Docker is genuinely holding the socket, or when the
-   * holder could not be identified. The daemon's port list and the socket scan are two
-   * observations taken moments apart, and the scan is the one that names who owns the
-   * port right now.
-   */
-  const containerFor = (entry: PortEntry): ContainerInfo | undefined => {
-    if (!containerIndex) {
-      return undefined;
-    }
-    // Reject only when the holder is *known* and is not Docker. An unnamed record is not
-    // evidence of anything: Windows emits `{ pid }` with no name for a process owned by
-    // another account, and Linux does the same when /proc is unreadable. Treating that as
-    // "not Docker" put Terminate Process back on a container row, aimed at the daemon.
-    if (entry.process?.name && !isDockerProcess(entry.process.name)) {
-      return undefined;
-    }
-    return findContainerForHostPort(
-      containerIndex,
-      entry.port,
-      entry.bindings.map((binding) => binding.address),
-    );
-  };
+  const containerFor = (entry: PortEntry): ContainerInfo | undefined =>
+    containerIndex
+      ? containerForScannedPort(
+          containerIndex,
+          entry.port,
+          entry.process?.name,
+          entry.bindings.map((binding) => binding.address),
+        )
+      : undefined;
 
   const containersByEntry = new Map<PortEntry, ContainerInfo>();
   const verdicts = new Map<PortEntry, { ownership: Ownership; basis: OwnershipBasis }>();

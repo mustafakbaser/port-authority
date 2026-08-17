@@ -1,14 +1,18 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
+import { containerForScannedPort, describeContainer, indexContainersByHostPort } from '../core/docker/match.js';
+import type { ContainerInfo } from '../core/docker/types.js';
 import { describeError } from '../core/errors.js';
 import { StreamingConflictDetector } from '../core/terminal/eaddrinuse.js';
 import type { PortConflict } from '../core/types.js';
 import { tildify } from '../core/util/paths.js';
 import { formatAge } from '../core/util/time.js';
 import { currentSettings } from './config.js';
+import type { DockerService } from './dockerService.js';
 import type { IgnoredPortStore } from './ignoredPorts.js';
 import type { Logger } from './logger.js';
 import type { PortService } from './portService.js';
+import type { StopContainerFlow } from './stopContainerFlow.js';
 import type { TerminateFlow } from './terminateFlow.js';
 
 /** Stop scanning a single command's output past this much text; build logs are unbounded. */
@@ -38,6 +42,8 @@ export class ConflictWatcher implements vscode.Disposable {
   constructor(
     private readonly ports: PortService,
     private readonly terminateFlow: TerminateFlow,
+    private readonly stopContainerFlow: StopContainerFlow,
+    private readonly docker: DockerService,
     private readonly ignored: IgnoredPortStore,
     private readonly logger: Logger,
   ) {}
@@ -154,7 +160,9 @@ export class ConflictWatcher implements vscode.Disposable {
     // Only the port is logged. `evidence` is raw terminal text from an arbitrary process
     // and can contain a connection string.
     this.logger.debug(`Port conflict candidate on ${conflict.port}`);
-    await this.ports.refresh('conflict', true);
+    // Both are needed before the notification can name the holder correctly, and neither
+    // depends on the other, so they run together.
+    await Promise.all([this.ports.refresh('conflict', true), this.docker.refresh(true)]);
     if (this.disposed) {
       return;
     }
@@ -169,21 +177,20 @@ export class ConflictWatcher implements vscode.Disposable {
     }
 
     const info = entry.process;
-    const where = tildify(info.cwd ?? info.executablePath, os.homedir());
-    const age = formatAge(info.startedAt, Date.now());
-    const description = [
-      `Port ${conflict.port} is held by ${info.name ?? 'a process'} (PID ${info.pid})`,
-      age ? `started ${age}` : undefined,
-      where ? `in ${where}` : undefined,
-    ]
-      .filter(Boolean)
-      .join(', ');
+    const container = this.containerFor(conflict.port, entry);
+
+    // The process behind a published container port is the Docker daemon, which holds
+    // every other container's ports too. Offering to terminate it here was the one path
+    // that still could, and it is the path users reach most often.
+    const description = container
+      ? this.describeContainerHolder(conflict.port, container)
+      : this.describeProcessHolder(conflict.port, info);
 
     // In an untrusted workspace the terminal text driving this notification is fully
-    // repo-controlled, so the destructive action is withheld: a malicious repo must not
-    // be able to put a "Terminate…" button in front of the user by printing a string.
+    // repo-controlled, so the destructive action is withheld either way.
+    const destructive = container ? 'Stop Container…' : 'Terminate…';
     const actions = vscode.workspace.isTrusted
-      ? ['Terminate…', 'Show Details', 'Ignore This Port']
+      ? [destructive, 'Show Details', 'Ignore This Port']
       : ['Show Details', 'Ignore This Port'];
     const choice = await vscode.window.showWarningMessage(`${description}.`, ...actions);
     if (this.disposed) {
@@ -191,6 +198,11 @@ export class ConflictWatcher implements vscode.Disposable {
     }
 
     switch (choice) {
+      case 'Stop Container…':
+        if (container) {
+          await this.stopContainerFlow.run({ port: conflict.port, containerId: container.id });
+        }
+        break;
       case 'Terminate…':
         await this.terminateFlow.run({
           port: conflict.port,
@@ -207,6 +219,44 @@ export class ConflictWatcher implements vscode.Disposable {
       default:
         break;
     }
+  }
+
+  private containerFor(port: number, entry: { process?: { name?: string }; bindings: readonly { address: string }[] }): ContainerInfo | undefined {
+    const snapshot = this.docker.snapshot;
+    if (snapshot.containers.length === 0) {
+      return undefined;
+    }
+    return containerForScannedPort(
+      indexContainersByHostPort(snapshot.containers),
+      port,
+      entry.process?.name,
+      entry.bindings.map((binding) => binding.address),
+    );
+  }
+
+  private describeContainerHolder(port: number, container: ContainerInfo): string {
+    const where = container.compose?.workingDir
+      ? tildify(container.compose.workingDir, os.homedir())
+      : undefined;
+    return [
+      `Port ${port} is published by the container ${describeContainer(container)} (${container.image})`,
+      container.status ? container.status.toLowerCase() : undefined,
+      where ? `from ${where}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  private describeProcessHolder(port: number, info: NonNullable<ReturnType<PortService['findEntry']>>['process']): string {
+    const where = tildify(info?.cwd ?? info?.executablePath, os.homedir());
+    const age = formatAge(info?.startedAt, Date.now());
+    return [
+      `Port ${port} is held by ${info?.name ?? 'a process'} (PID ${info?.pid})`,
+      age ? `started ${age}` : undefined,
+      where ? `in ${where}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(', ');
   }
 
   dispose(): void {

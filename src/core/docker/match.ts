@@ -76,6 +76,29 @@ export function findContainerForHostPort(
 }
 
 /**
+ * The container that should be shown for a scanned port, or nothing.
+ *
+ * This is the single place the rule lives, so the tree, the quick pick and the port
+ * conflict notification cannot drift apart on it. Two conditions have to hold: the
+ * daemon must publish the port, and the socket scan must not name a holder that is
+ * something other than Docker.
+ *
+ * An absent holder name is not evidence either way, so it does not veto the container.
+ * Reading it as a veto is what put Terminate Process back on container rows.
+ */
+export function containerForScannedPort(
+  index: ContainerPortIndex,
+  port: number,
+  holderName: string | undefined,
+  observedAddresses: readonly string[] = [],
+): ContainerInfo | undefined {
+  if (holderName && !isDockerProcess(holderName)) {
+    return undefined;
+  }
+  return findContainerForHostPort(index, port, observedAddresses);
+}
+
+/**
  * True when the container was started by a Compose project inside one of the open folders.
  *
  * This is the container equivalent of matching a process working directory, and it uses

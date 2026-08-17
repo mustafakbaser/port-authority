@@ -127,7 +127,7 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
 
   // The watcher is always installed; it reads `eaddrinuse.enabled` on every event so the
   // setting can be toggled without a reload. Its listeners cost nothing while disabled.
-  const watcher = new ConflictWatcher(ports, terminateFlow, ignored, logger);
+  const watcher = new ConflictWatcher(ports, terminateFlow, stopContainerFlow, docker, ignored, logger);
   watcher.start();
   context.subscriptions.push(watcher);
 
