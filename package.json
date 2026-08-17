@@ -208,12 +208,12 @@
         },
         {
           "command": "portAuthority.copyPid",
-          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "when": "view == portAuthority.ports && viewItem =~ /:killable/",
           "group": "2_copy@1"
         },
         {
           "command": "portAuthority.copyCommandLine",
-          "when": "view == portAuthority.ports && viewItem =~ /^port\\.listening/",
+          "when": "view == portAuthority.ports && viewItem =~ /:killable/",
           "group": "2_copy@2"
         },
         {

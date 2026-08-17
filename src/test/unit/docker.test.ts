@@ -11,7 +11,10 @@ import {
 } from '../../core/docker/match.js';
 import {
   endpointFromDockerHost,
-  expandHome,
+  expandCandidate,
+  contextMetaDirectory,
+  endpointFromContextMeta,
+  readCurrentContextName,
   resolveDockerEndpoint,
   WINDOWS_PIPE,
 } from '../../core/docker/endpoint.js';
@@ -166,10 +169,65 @@ describe('choosing an endpoint', () => {
     assert.deepEqual(candidates, []);
   });
 
-  it('expands only a leading tilde', () => {
-    assert.equal(expandHome('~/.docker/run/docker.sock', '/home/dev'), '/home/dev/.docker/run/docker.sock');
-    assert.equal(expandHome('/var/run/docker.sock', '/home/dev'), '/var/run/docker.sock');
-    assert.equal(expandHome('~/x', undefined), '~/x');
+  it('expands a leading tilde and XDG_RUNTIME_DIR, and drops what it cannot expand', () => {
+    assert.equal(expandCandidate('~/.docker/run/docker.sock', '/home/dev'), '/home/dev/.docker/run/docker.sock');
+    assert.equal(expandCandidate('/var/run/docker.sock', '/home/dev'), '/var/run/docker.sock');
+    assert.equal(
+      expandCandidate('$XDG_RUNTIME_DIR/docker.sock', '/home/dev', { XDG_RUNTIME_DIR: '/run/user/1000' }),
+      '/run/user/1000/docker.sock',
+    );
+    // A literal `$XDG_RUNTIME_DIR/...` path would be probed pointlessly on every scan.
+    assert.equal(expandCandidate('$XDG_RUNTIME_DIR/docker.sock', '/home/dev'), undefined);
+    assert.equal(expandCandidate('~/x', undefined), undefined);
+  });
+
+  it('rejects a DOCKER_HOST that names no path', () => {
+    // Node treats a falsy socketPath as absent and connects to localhost:80 instead,
+    // which would be an actual network request.
+    for (const value of ['unix://', 'npipe://']) {
+      const endpoint = endpointFromDockerHost(value);
+      assert.equal(endpoint.kind, 'unavailable', value);
+    }
+  });
+
+  it('covers the runtimes people actually use on linux', () => {
+    const { candidates } = resolveDockerEndpoint(
+      'linux',
+      { XDG_RUNTIME_DIR: '/run/user/1000' },
+      '/home/dev',
+    );
+    for (const expected of [
+      '/var/run/docker.sock',
+      '/run/user/1000/docker.sock', // rootless Docker
+      '/home/dev/.docker/desktop/docker.sock', // Docker Desktop for Linux
+      '/run/user/1000/podman/podman.sock', // rootless Podman
+    ]) {
+      assert.ok(candidates.includes(expected), expected);
+    }
+  });
+
+  it('follows the active docker context, which is what the CLI does', () => {
+    assert.equal(readCurrentContextName('{"currentContext":"desktop-linux"}'), 'desktop-linux');
+    assert.equal(readCurrentContextName('{"currentContext":"default"}'), undefined);
+    assert.equal(readCurrentContextName('{}'), undefined);
+    assert.equal(readCurrentContextName('not json'), undefined);
+
+    // Recorded from this machine: the directory is the hex sha256 of the context name.
+    assert.equal(
+      contextMetaDirectory('desktop-linux'),
+      'fe9c6bd7a66301f49ca9b6a70b217107cd1284598bfc254700c989b916da791e',
+    );
+
+    assert.deepEqual(
+      endpointFromContextMeta('{"Name":"desktop-linux","Endpoints":{"docker":{"Host":"unix:///Users/dev/.docker/run/docker.sock"}}}'),
+      { kind: 'socket', path: '/Users/dev/.docker/run/docker.sock' },
+    );
+    assert.equal(endpointFromContextMeta('{"Endpoints":{}}'), undefined);
+    assert.equal(
+      endpointFromContextMeta('{"Endpoints":{"docker":{"Host":"tcp://build:2375"}}}')?.kind,
+      'unavailable',
+      'a remote context is refused, not ignored',
+    );
   });
 });
 

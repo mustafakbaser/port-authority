@@ -3,6 +3,7 @@ import { containerOf, entryOf, isActionableNode, portOf, type PortTreeDataProvid
 import type { IgnoredPortStore } from './ignoredPorts.js';
 import type { Logger } from './logger.js';
 import type { PortService } from './portService.js';
+import type { DockerService } from './dockerService.js';
 import type { StopContainerFlow } from './stopContainerFlow.js';
 import type { TerminateFlow } from './terminateFlow.js';
 
@@ -11,6 +12,7 @@ export interface CommandDependencies {
   readonly tree: PortTreeDataProvider;
   readonly terminateFlow: TerminateFlow;
   readonly stopContainerFlow: StopContainerFlow;
+  readonly docker: DockerService;
   readonly ignored: IgnoredPortStore;
   readonly logger: Logger;
 }
@@ -22,7 +24,13 @@ export function registerCommands(deps: CommandDependencies): vscode.Disposable[]
     vscode.commands.registerCommand(id, handler);
 
   return [
-    register('portAuthority.refresh', () => ports.refresh('command', true)),
+    register('portAuthority.refresh', async () => {
+      // Refresh is what a user presses when something looks wrong, so it also forgets a
+      // cached Docker failure. Without this, starting Docker meant waiting out the backoff
+      // or reloading the window, and the button appeared to do nothing.
+      deps.docker.reset();
+      await Promise.all([ports.refresh('command', true), deps.docker.refresh(true)]);
+    }),
 
     register('portAuthority.showLog', () => logger.show()),
 

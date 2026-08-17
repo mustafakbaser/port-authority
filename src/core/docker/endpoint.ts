@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { DockerUnavailableReason } from './types.js';
 
 export type DockerEndpoint =
@@ -20,6 +21,7 @@ export const SOCKET_CANDIDATES: Readonly<Record<'darwin' | 'linux', readonly str
   darwin: [
     '~/.docker/run/docker.sock',
     '/var/run/docker.sock',
+    '~/.orbstack/run/docker.sock',
     '~/.colima/default/docker.sock',
     '~/.rd/docker.sock',
     '~/.lima/docker/sock/docker.sock',
@@ -27,19 +29,38 @@ export const SOCKET_CANDIDATES: Readonly<Record<'darwin' | 'linux', readonly str
   linux: [
     '/var/run/docker.sock',
     '/run/docker.sock',
+    // Rootless Docker, whose DOCKER_HOST is exported from a shell profile that VS Code
+    // does not inherit when it is launched from a desktop entry.
+    '$XDG_RUNTIME_DIR/docker.sock',
+    // Docker Desktop for Linux, which does not create /var/run/docker.sock at all.
+    '~/.docker/desktop/docker.sock',
     '~/.docker/run/docker.sock',
+    // Podman's Docker-compatible API, rootless first.
+    '$XDG_RUNTIME_DIR/podman/podman.sock',
+    '/run/podman/podman.sock',
     '~/.rd/docker.sock',
   ],
 };
 
 export const WINDOWS_PIPE = '\\\\.\\pipe\\docker_engine';
 
-/** Expands a leading `~` against the given home directory. Nothing else is expanded. */
-export function expandHome(candidate: string, home: string | undefined): string {
-  if (!candidate.startsWith('~/') || !home) {
-    return candidate;
+/**
+ * Expands a leading `~` and a leading `$XDG_RUNTIME_DIR`. Nothing else is expanded, and a
+ * candidate whose variable is unset is dropped rather than left as a literal path.
+ */
+export function expandCandidate(
+  candidate: string,
+  home: string | undefined,
+  env: { XDG_RUNTIME_DIR?: string } = {},
+): string | undefined {
+  if (candidate.startsWith('$XDG_RUNTIME_DIR/')) {
+    const base = env.XDG_RUNTIME_DIR?.replace(/[/\\]$/, '');
+    return base ? `${base}/${candidate.slice('$XDG_RUNTIME_DIR/'.length)}` : undefined;
   }
-  return `${home.replace(/[/\\]$/, '')}/${candidate.slice(2)}`;
+  if (candidate.startsWith('~/')) {
+    return home ? `${home.replace(/[/\\]$/, '')}/${candidate.slice(2)}` : undefined;
+  }
+  return candidate;
 }
 
 /**
@@ -58,10 +79,19 @@ export function endpointFromDockerHost(value: string): DockerEndpoint {
   }
 
   if (trimmed.startsWith('unix://')) {
-    return { kind: 'socket', path: trimmed.slice('unix://'.length) };
+    const path = trimmed.slice('unix://'.length);
+    // An empty path is not a socket. Node treats a falsy `socketPath` as absent and falls
+    // back to a TCP connection to localhost:80, which would break the promise that this
+    // extension makes no network requests.
+    return path
+      ? { kind: 'socket', path }
+      : { kind: 'unavailable', reason: 'notFound', message: 'DOCKER_HOST names no socket path.' };
   }
   if (trimmed.startsWith('npipe://')) {
-    return { kind: 'pipe', path: trimmed.slice('npipe://'.length).replace(/\//g, '\\') };
+    const path = trimmed.slice('npipe://'.length).replace(/\//g, '\\');
+    return path
+      ? { kind: 'pipe', path }
+      : { kind: 'unavailable', reason: 'notFound', message: 'DOCKER_HOST names no pipe path.' };
   }
   if (trimmed.startsWith('/') || trimmed.startsWith('\\\\')) {
     // A bare path, which some tooling writes instead of a URL.
@@ -77,6 +107,43 @@ export function endpointFromDockerHost(value: string): DockerEndpoint {
   };
 }
 
+/**
+ * The Docker CLI reads its endpoint from the active context, not from a fixed path, so a
+ * machine with both Docker Desktop and Colima can have `docker ps` pointed somewhere the
+ * candidate list would never choose. Following the context is what keeps this extension
+ * looking at the same daemon the user is.
+ */
+export function readCurrentContextName(configJson: string): string | undefined {
+  try {
+    const parsed = JSON.parse(configJson) as { currentContext?: unknown };
+    const name = typeof parsed.currentContext === 'string' ? parsed.currentContext.trim() : '';
+    // `default` means "no context", and its endpoint is the platform default anyway.
+    return name && name !== 'default' ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Contexts are stored under the hex sha256 of their name. */
+export function contextMetaDirectory(contextName: string): string {
+  return createHash('sha256').update(contextName).digest('hex');
+}
+
+export function endpointFromContextMeta(metaJson: string): DockerEndpoint | undefined {
+  try {
+    const parsed = JSON.parse(metaJson) as { Endpoints?: { docker?: { Host?: unknown } } };
+    const host = parsed.Endpoints?.docker?.Host;
+    if (typeof host !== 'string' || host.length === 0) {
+      return undefined;
+    }
+    const endpoint = endpointFromDockerHost(host);
+    // A context pointing at a remote daemon is refused for the same reason DOCKER_HOST is.
+    return endpoint.kind === 'unavailable' && endpoint.reason !== 'remoteRefused' ? undefined : endpoint;
+  } catch {
+    return undefined;
+  }
+}
+
 export interface EndpointResolution {
   readonly endpoint: DockerEndpoint;
   /** Local socket paths worth checking, in order. Empty when `endpoint` is already decided. */
@@ -88,7 +155,7 @@ export interface EndpointResolution {
  */
 export function resolveDockerEndpoint(
   platform: NodeJS.Platform,
-  env: { DOCKER_HOST?: string } = {},
+  env: { DOCKER_HOST?: string; XDG_RUNTIME_DIR?: string } = {},
   home?: string,
 ): EndpointResolution {
   if (env.DOCKER_HOST) {
@@ -108,6 +175,8 @@ export function resolveDockerEndpoint(
 
   return {
     endpoint: { kind: 'unavailable', reason: 'notFound', message: 'No Docker socket was found.' },
-    candidates: SOCKET_CANDIDATES[platform].map((candidate) => expandHome(candidate, home)),
+    candidates: SOCKET_CANDIDATES[platform]
+      .map((candidate) => expandCandidate(candidate, home, env))
+      .filter((candidate): candidate is string => candidate !== undefined),
   };
 }

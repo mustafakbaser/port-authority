@@ -21,7 +21,9 @@ export class DockerService implements vscode.Disposable {
   readonly onDidChange = this.emitter.event;
 
   private snapshotValue: DockerSnapshot = { containers: [] };
-  private inFlight: Promise<void> | undefined;
+  /** Serialises requests; a forced refresh chains onto the tail rather than joining it. */
+  private tail: Promise<void> = Promise.resolve();
+  private pending = 0;
   private lastRefreshAt = 0;
   private controller: AbortController | undefined;
   private disposed = false;
@@ -55,22 +57,34 @@ export class DockerService implements vscode.Disposable {
       }
       return Promise.resolve();
     }
-    if (this.inFlight) {
-      return this.inFlight;
-    }
-    if (!force && Date.now() - this.lastRefreshAt < MIN_REFRESH_GAP_MS) {
-      return Promise.resolve();
+    if (!force) {
+      if (this.pending > 0) {
+        return this.tail;
+      }
+      if (Date.now() - this.lastRefreshAt < MIN_REFRESH_GAP_MS) {
+        return Promise.resolve();
+      }
     }
 
-    const controller = new AbortController();
-    this.controller = controller;
-    this.inFlight = this.run(controller).finally(() => {
-      this.inFlight = undefined;
-      if (this.controller === controller) {
-        this.controller = undefined;
-      }
-    });
-    return this.inFlight;
+    // A forced refresh must be answered by a request that *started after the call*, or the
+    // "re-read the container immediately before stopping it" property is not held: a poll
+    // that began before the confirmation dialog opened would satisfy it otherwise.
+    this.pending += 1;
+    const run = this.tail
+      .then(() => {
+        const controller = new AbortController();
+        this.controller = controller;
+        return this.run(controller).finally(() => {
+          if (this.controller === controller) {
+            this.controller = undefined;
+          }
+        });
+      })
+      .finally(() => {
+        this.pending -= 1;
+      });
+    this.tail = run.catch(() => undefined);
+    return this.tail;
   }
 
   private async run(controller: AbortController): Promise<void> {

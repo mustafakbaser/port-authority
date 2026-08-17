@@ -122,7 +122,7 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
       logger.info('Workspace trust granted; enabling workspace expectations.');
       expectations.start();
     }),
-    ...registerCommands({ ports, tree, terminateFlow, stopContainerFlow, ignored, logger }),
+    ...registerCommands({ ports, tree, terminateFlow, stopContainerFlow, docker, ignored, logger }),
   );
 
   // The watcher is always installed; it reads `eaddrinuse.enabled` on every event so the

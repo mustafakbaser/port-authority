@@ -2,7 +2,12 @@ import * as http from 'node:http';
 import * as fs from 'node:fs/promises';
 import { CancelledError } from '../core/errors.js';
 import type { DockerEndpoint } from '../core/docker/endpoint.js';
-import { resolveDockerEndpoint } from '../core/docker/endpoint.js';
+import {
+  contextMetaDirectory,
+  endpointFromContextMeta,
+  readCurrentContextName,
+  resolveDockerEndpoint,
+} from '../core/docker/endpoint.js';
 import { parseContainers } from '../core/docker/parse.js';
 import type { DockerSnapshot } from '../core/docker/types.js';
 
@@ -27,6 +32,7 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
  */
 export class DockerClient {
   private endpoint: DockerEndpoint | undefined;
+  private lastFailure: Extract<DockerEndpoint, { kind: 'unavailable' }> | undefined;
   private nextProbeAt = 0;
 
   constructor(
@@ -36,11 +42,14 @@ export class DockerClient {
     private readonly now: () => number = Date.now,
     /** How long to wait before looking for a daemon again after failing to find one. */
     private readonly backoffMs = 60_000,
+    /** A liveness probe should fail fast; the daemon answers `/_ping` in a millisecond. */
+    private readonly probeTimeoutMs = 1500,
   ) {}
 
   /** Forgets a cached failure so the next call probes again, e.g. after Docker was started. */
   reset(): void {
     this.endpoint = undefined;
+    this.lastFailure = undefined;
     this.nextProbeAt = 0;
   }
 
@@ -61,7 +70,7 @@ export class DockerClient {
       // moves its socket between restarts often enough that pinning to a dead path would
       // keep the integration broken until the window is reloaded.
       this.endpoint = undefined;
-      this.nextProbeAt = this.now() + this.backoffMs;
+      this.lastFailure = undefined;
       return {
         containers: [],
         unavailable: {
@@ -95,29 +104,78 @@ export class DockerClient {
       return this.endpoint;
     }
     if (this.now() < this.nextProbeAt) {
-      return { kind: 'unavailable', reason: 'notFound', message: 'No Docker socket was found.' };
+      // Report what actually failed. Synthesising "no socket found" here told a user who
+      // is simply not in the docker group the wrong thing for 59 seconds out of every 60.
+      return this.lastFailure ?? { kind: 'unavailable', reason: 'notFound', message: 'No Docker socket was found.' };
     }
 
     const { endpoint, candidates } = resolveDockerEndpoint(this.platform, this.env, this.home);
-    if (endpoint.kind !== 'unavailable') {
-      this.endpoint = endpoint;
-      return endpoint;
-    }
-    if (endpoint.reason === 'remoteRefused') {
-      // Not a transient failure, and not worth re-checking on a timer.
+
+    // An explicit DOCKER_HOST is authoritative. If it is unusable, say so rather than
+    // quietly falling through to a different daemon than the user asked for.
+    if (endpoint.kind === 'unavailable' && this.env.DOCKER_HOST) {
       this.endpoint = endpoint;
       return endpoint;
     }
 
-    for (const candidate of candidates) {
-      if (await isSocket(candidate)) {
-        this.endpoint = { kind: 'socket', path: candidate };
-        return this.endpoint;
+    // DOCKER_HOST and the named pipe are explicit answers; the candidate list is a guess.
+    // Either way every option is proved with a real request before it is remembered,
+    // because a socket file left behind by a stopped daemon passes every cheaper test.
+    const options: DockerEndpoint[] =
+      endpoint.kind === 'unavailable'
+        ? [...(await this.contextEndpoint()), ...candidates.map((path) => ({ kind: 'socket', path }) as const)]
+        : [endpoint];
+
+    let lastError: string | undefined;
+    for (const option of options) {
+      if (option.kind === 'unavailable') {
+        continue;
+      }
+      try {
+        await this.request(option, 'GET', '/_ping', { timeoutMs: this.probeTimeoutMs });
+        this.endpoint = option;
+        this.lastFailure = undefined;
+        return option;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
       }
     }
 
+    this.lastFailure = {
+      kind: 'unavailable',
+      reason: lastError ? 'unreachable' : 'notFound',
+      message: lastError ? describeProbeFailure(lastError) : 'No Docker socket was found.',
+    };
     this.nextProbeAt = this.now() + this.backoffMs;
-    return endpoint;
+    return this.lastFailure;
+  }
+
+  /**
+   * The endpoint the Docker CLI itself would use.
+   *
+   * Without this, a machine running both Docker Desktop and Colima can have the extension
+   * listing containers from one daemon while `docker ps` shows the other, which would make
+   * Stop Container act on something the user is not looking at.
+   */
+  private async contextEndpoint(): Promise<DockerEndpoint[]> {
+    if (!this.home) {
+      return [];
+    }
+    try {
+      const name = readCurrentContextName(await fs.readFile(`${this.home}/.docker/config.json`, 'utf8'));
+      if (!name) {
+        return [];
+      }
+      const meta = await fs.readFile(
+        `${this.home}/.docker/contexts/meta/${contextMetaDirectory(name)}/meta.json`,
+        'utf8',
+      );
+      const endpoint = endpointFromContextMeta(meta);
+      return endpoint ? [endpoint] : [];
+    } catch {
+      // No config, no context, or an unreadable one. The candidate list still applies.
+      return [];
+    }
   }
 
   private request(
@@ -191,10 +249,16 @@ function describeDaemonError(body: string): string {
   return body.trim().slice(0, 200) || 'no details';
 }
 
-async function isSocket(path: string): Promise<boolean> {
-  try {
-    return (await fs.stat(path)).isSocket();
-  } catch {
-    return false;
+/**
+ * Turns a connect error into something a user can act on. `EACCES` on the socket is the
+ * single most common Docker problem on Linux and the raw errno says nothing about the fix.
+ */
+function describeProbeFailure(message: string): string {
+  if (message.includes('EACCES')) {
+    return 'Docker is running but its socket is not readable by this user. On Linux, adding yourself to the "docker" group and logging in again usually fixes it.';
   }
+  if (message.includes('ECONNREFUSED')) {
+    return 'A Docker socket exists but nothing is listening on it. The daemon is probably stopped.';
+  }
+  return `The Docker daemon could not be reached: ${message}`;
 }
