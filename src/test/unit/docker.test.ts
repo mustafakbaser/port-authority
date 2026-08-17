@@ -7,6 +7,7 @@ import {
   describeContainer,
   findContainerForHostPort,
   indexContainersByHostPort,
+  isDockerProcess,
 } from '../../core/docker/match.js';
 import {
   endpointFromDockerHost,
@@ -16,6 +17,8 @@ import {
 } from '../../core/docker/endpoint.js';
 import { parseContainers } from '../../core/docker/parse.js';
 import type { ContainerInfo } from '../../core/docker/types.js';
+import { buildModel } from '../../core/model.js';
+import type { PortEntry } from '../../core/ports/scanner.js';
 
 /**
  * Recorded from a real daemon rather than written from the reference docs, then edited to
@@ -224,5 +227,92 @@ describe('describing a container', () => {
 
   it('falls back to the container name', () => {
     assert.equal(describeContainer(byName('standalone-proxy')), 'standalone-proxy');
+  });
+});
+
+describe('deciding when a container may be attached to a row', () => {
+  it('recognises the daemon on each platform', () => {
+    for (const name of ['com.docker.backend', 'dockerd', 'docker-proxy', 'Docker Desktop Backend', 'dockerd.exe']) {
+      assert.equal(isDockerProcess(name), true, name);
+    }
+  });
+
+  /**
+   * The daemon's port list and a socket scan are taken moments apart. When they disagree,
+   * the scan wins: it names the process that owns the socket right now. Labelling someone
+   * else's server with a container name would be a confident, wrong answer on the row a
+   * user is most likely to act on.
+   */
+  it('does not treat an ordinary process as Docker', () => {
+    for (const name of ['node', 'postgres', 'nginx', 'docker-compose', 'my-docker-helper', undefined]) {
+      assert.equal(isDockerProcess(name), false, String(name));
+    }
+  });
+});
+
+describe('joining containers into the port model', () => {
+  const FOLDER = '/home/dev/shop';
+  const context = { workspaceFolders: [FOLDER], caseInsensitive: false };
+
+  const dockerHeld = (port: number): PortEntry => ({
+    port,
+    process: { pid: 43435, name: 'com.docker.backend', cwd: '/Users/x/Library/Containers/com.docker.docker/Data' },
+    bindings: [{ address: '*', family: 'ipv4', scope: 'any' }],
+    scope: 'any',
+  });
+
+  it('names the container instead of the daemon, and owns it through compose', () => {
+    const model = buildModel([dockerHeld(6379)], [], context, containers);
+    const row = model.all[0];
+    assert.equal(row.container?.name, 'shop-cache-1');
+    assert.equal(row.ownership, 'workspace');
+    assert.equal(row.basis, 'container');
+  });
+
+  /**
+   * Without a container the daemon's own working directory decides, and it sits under
+   * ~/Library/Containers, so every published port used to read FOREIGN on evidence that
+   * says nothing about the container.
+   */
+  it('replaces the verdict the daemon working directory would have produced', () => {
+    const withoutDocker = buildModel([dockerHeld(6379)], [], context, []);
+    assert.equal(withoutDocker.all[0].ownership, 'foreign');
+    assert.equal(withoutDocker.all[0].container, undefined);
+  });
+
+  it('marks a container from another project as foreign', () => {
+    const model = buildModel([dockerHeld(6379)], [], { ...context, workspaceFolders: ['/home/dev/other'] }, containers);
+    assert.equal(model.all[0].ownership, 'foreign');
+    assert.equal(model.all[0].basis, 'container');
+  });
+
+  it('leaves a docker run container unowned rather than calling it foreign', () => {
+    const model = buildModel([dockerHeld(8099)], [], context, containers);
+    assert.equal(model.all[0].container?.name, 'standalone-proxy');
+    assert.equal(model.all[0].ownership, 'unknown');
+  });
+
+  it('trusts the socket scan when an ordinary process holds a port docker also claims', () => {
+    const heldByNode: PortEntry = {
+      port: 6379,
+      process: { pid: 900, name: 'node', cwd: FOLDER },
+      bindings: [{ address: '127.0.0.1', family: 'ipv4', scope: 'loopback' }],
+      scope: 'loopback',
+    };
+    const model = buildModel([heldByNode], [], context, containers);
+    assert.equal(model.all[0].container, undefined, 'the container must not be attached');
+    assert.equal(model.all[0].basis, 'cwd');
+  });
+
+  it('attaches a container to an expected port too', () => {
+    const expectation = {
+      port: 6379,
+      label: 'REDIS_PORT',
+      source: { file: '.env', hint: 'REDIS_PORT' },
+      folder: FOLDER,
+    };
+    const model = buildModel([dockerHeld(6379)], [expectation], context, containers);
+    assert.equal(model.expectations[0].container?.name, 'shop-cache-1');
+    assert.equal(model.expectations[0].status, 'held-by-workspace');
   });
 });

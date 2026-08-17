@@ -10,11 +10,12 @@ export interface OwnershipContext {
 /**
  * What the classification is based on.
  *
- * This matters beyond display: only `cwd` is direct evidence. The command-line heuristic
- * is a convenience for platforms that cannot report a working directory, and it must
- * never be strong enough to unlock the confirmation skip in the terminate flow.
+ * This matters beyond display: `cwd` and `container` are direct evidence. The
+ * command-line heuristic is a convenience for platforms that cannot report a working
+ * directory, and it must never be strong enough to unlock the confirmation skip in the
+ * terminate flow.
  */
-export type OwnershipBasis = 'cwd' | 'commandLine' | 'none';
+export type OwnershipBasis = 'cwd' | 'commandLine' | 'container' | 'none';
 
 export interface OwnershipVerdict {
   readonly ownership: Ownership;

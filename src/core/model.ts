@@ -1,3 +1,10 @@
+import {
+  classifyContainerOwnership,
+  findContainerForHostPort,
+  indexContainersByHostPort,
+  isDockerProcess,
+} from './docker/match.js';
+import type { ContainerInfo } from './docker/types.js';
 import { classifyOwnershipDetailed, type OwnershipBasis, type OwnershipContext } from './ownership.js';
 import type { PortEntry } from './ports/scanner.js';
 import type { Ownership, PortExpectation } from './types.js';
@@ -16,8 +23,10 @@ export interface ExpectationRow {
   readonly expectation: PortExpectation;
   readonly entry?: PortEntry;
   readonly ownership: Ownership;
-  /** What the ownership verdict rests on. Only `cwd` is direct evidence. */
+  /** What the ownership verdict rests on. `cwd` and `container` are direct evidence. */
   readonly basis: OwnershipBasis;
+  /** Set when this port is published by a container rather than held by a plain process. */
+  readonly container?: ContainerInfo;
   readonly status: ExpectationStatus;
 }
 
@@ -25,6 +34,8 @@ export interface PortRow {
   readonly entry: PortEntry;
   readonly ownership: Ownership;
   readonly basis: OwnershipBasis;
+  /** Set when this port is published by a container rather than held by a plain process. */
+  readonly container?: ContainerInfo;
   /** Set when this port is also an expectation of the workspace. */
   readonly expectation?: PortExpectation;
 }
@@ -47,10 +58,41 @@ export function buildModel(
   entries: readonly PortEntry[],
   expectations: readonly PortExpectation[],
   context: OwnershipContext,
+  containers: readonly ContainerInfo[] = [],
 ): PortModel {
+  const containerIndex = containers.length > 0 ? indexContainersByHostPort(containers) : undefined;
+
+  /**
+   * A container is only attached when Docker is genuinely holding the socket, or when the
+   * holder could not be identified. The daemon's port list and the socket scan are two
+   * observations taken moments apart, and the scan is the one that names who owns the
+   * port right now.
+   */
+  const containerFor = (entry: PortEntry): ContainerInfo | undefined => {
+    if (!containerIndex) {
+      return undefined;
+    }
+    if (entry.process && !isDockerProcess(entry.process.name)) {
+      return undefined;
+    }
+    return findContainerForHostPort(containerIndex, entry.port);
+  };
+
+  const containersByEntry = new Map<PortEntry, ContainerInfo>();
   const verdicts = new Map<PortEntry, { ownership: Ownership; basis: OwnershipBasis }>();
   for (const entry of entries) {
-    verdicts.set(entry, classifyOwnershipDetailed(entry.process, context));
+    const container = containerFor(entry);
+    if (container) {
+      containersByEntry.set(entry, container);
+    }
+    // A container's Compose directory replaces the daemon's own working directory, which
+    // would otherwise label every published port FOREIGN on meaningless evidence.
+    verdicts.set(
+      entry,
+      container
+        ? classifyContainerOwnership(container, context.workspaceFolders, context.caseInsensitive)
+        : classifyOwnershipDetailed(entry.process, context),
+    );
   }
 
   const expectationByPort = new Map<number, PortExpectation>();
@@ -72,6 +114,7 @@ export function buildModel(
       ...(entry ? { entry } : {}),
       ownership,
       basis: verdict?.basis ?? 'none',
+      ...(entry && containersByEntry.has(entry) ? { container: containersByEntry.get(entry)! } : {}),
       status: !entry
         ? 'free'
         : ownership === 'workspace'
@@ -89,6 +132,7 @@ export function buildModel(
       entry,
       ownership: verdict?.ownership ?? 'unknown',
       basis: verdict?.basis ?? 'none',
+      ...(containersByEntry.has(entry) ? { container: containersByEntry.get(entry)! } : {}),
       ...(expectation ? { expectation } : {}),
     };
   });
