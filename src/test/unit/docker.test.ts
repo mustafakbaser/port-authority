@@ -19,6 +19,7 @@ import {
   WINDOWS_PIPE,
 } from '../../core/docker/endpoint.js';
 import { parseContainers } from '../../core/docker/parse.js';
+import { evaluateContainerStop, publishedHostPorts } from '../../core/docker/stop.js';
 import type { ContainerInfo } from '../../core/docker/types.js';
 import { buildModel } from '../../core/model.js';
 import type { PortEntry } from '../../core/ports/scanner.js';
@@ -456,5 +457,62 @@ describe('regressions found in review', () => {
     assert.equal(only.compose?.service, undefined);
     assert.equal(containerBelongsToWorkspace(only, [FOLDER], false), true);
     assert.equal(describeContainer(only), 'supabase_kong_shop', 'no service, so the name is the label');
+  });
+});
+
+describe('deciding whether a container may be stopped', () => {
+  const container = byName('shop-cache-1');
+  const snapshot = { containers };
+  const request = { port: 6379, containerId: container.id };
+
+  it('allows a running container that still publishes the port', () => {
+    const verdict = evaluateContainerStop(snapshot, request);
+    assert.equal(verdict.ok, true);
+    assert.equal(verdict.ok && verdict.container.name, 'shop-cache-1');
+  });
+
+  /** All three can change while a confirmation dialog sits on screen. */
+  it('refuses when the container is gone', () => {
+    const verdict = evaluateContainerStop({ containers: [] }, request);
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.ok === false ? verdict.reason : '', /no longer known/);
+  });
+
+  it('refuses when it no longer holds its ports', () => {
+    const stopped = { containers: [{ ...container, state: 'exited' }] };
+    const verdict = evaluateContainerStop(stopped, request);
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.ok === false ? verdict.reason : '', /already exited/);
+  });
+
+  it('refuses when the port changed hands', () => {
+    const verdict = evaluateContainerStop(snapshot, { ...request, port: 9999 });
+    assert.equal(verdict.ok, false);
+    assert.match(verdict.ok === false ? verdict.reason : '', /no longer publishes port 9999/);
+  });
+
+  it('refuses when the daemon itself became unreachable', () => {
+    const verdict = evaluateContainerStop(
+      { containers, unavailable: { reason: 'unreachable', message: 'Docker went away.' } },
+      request,
+    );
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.ok === false && verdict.reason, 'Docker went away.');
+  });
+
+  /** A range publication frees more ports than the one the user clicked on. */
+  it('lists every host port the container publishes', () => {
+    const ranged = parseContainers([
+      {
+        Id: 'd'.repeat(64),
+        Names: ['/range'],
+        State: 'running',
+        Ports: [8000, 8001, 8002].flatMap((port) => [
+          { IP: '0.0.0.0', PrivatePort: port, PublicPort: port, Type: 'tcp' },
+          { IP: '::', PrivatePort: port, PublicPort: port, Type: 'tcp' },
+        ]),
+      },
+    ]);
+    assert.deepEqual(publishedHostPorts(ranged[0]), [8000, 8001, 8002]);
   });
 });

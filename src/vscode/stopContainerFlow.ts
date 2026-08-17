@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { describeContainer } from '../core/docker/match.js';
+import { evaluateContainerStop, publishedHostPorts } from '../core/docker/stop.js';
 import type { ContainerInfo } from '../core/docker/types.js';
 import { readTerminateSettings } from './config.js';
 import type { DockerService } from './dockerService.js';
@@ -95,36 +96,22 @@ export class StopContainerFlow {
     request: StopContainerRequest,
   ): Promise<{ ok: true; container: ContainerInfo } | { ok: false; reason: string }> {
     await this.docker.refresh(true);
-
-    const snapshot = this.docker.snapshot;
-    if (snapshot.unavailable) {
-      return { ok: false, reason: snapshot.unavailable.message };
-    }
-
-    const container = snapshot.containers.find((candidate) => candidate.id === request.containerId);
-    if (!container) {
-      return { ok: false, reason: `That container is no longer known to Docker.` };
-    }
-    if (container.state !== 'running') {
-      return { ok: false, reason: `${describeContainer(container)} is already ${container.state}.` };
-    }
-    if (!container.bindings.some((binding) => binding.hostPort === request.port)) {
-      return {
-        ok: false,
-        reason: `${describeContainer(container)} no longer publishes port ${request.port}.`,
-      };
-    }
-    return { ok: true, container };
+    return evaluateContainerStop(this.docker.snapshot, request);
   }
 
   private async confirm(container: ContainerInfo, port: number): Promise<boolean> {
     const compose = container.compose;
+    // A range publication frees more than the port the user clicked on.
+    const otherPorts = publishedHostPorts(container).filter((candidate) => candidate !== port);
     const detail = [
       `Container: ${container.name} (${container.shortId})`,
       `Image: ${container.image}`,
       compose ? `Compose: ${compose.project} / ${compose.service}` : undefined,
       compose?.workingDir ? `Project: ${compose.workingDir}` : undefined,
       container.status ? `State: ${container.status}` : undefined,
+      otherPorts.length > 0
+        ? `This also frees port${otherPorts.length > 1 ? 's' : ''} ${otherPorts.join(', ')}.`
+        : undefined,
       '',
       // The honest framing. This is not the irreversible warning the process flow uses,
       // and pretending otherwise would train users to ignore both.

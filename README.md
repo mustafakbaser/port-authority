@@ -62,19 +62,29 @@ which container publishes each port and shows that instead:
 ⚠ 6379  redis-queue   shop/cache · redis:7-alpine · up 2 days · FOREIGN
 ```
 
-Ownership works the same way it does for a process. A container started by a Compose file
-inside one of your open folders is yours; one from another project is not. A container
-started with plain `docker run` carries no project directory, so it stays unknown rather
-than being guessed at.
+Ownership works the same way it does for a process, when Compose recorded where the
+project lives. Compose writes a `project.working_dir` label, and a container whose project
+directory sits inside one of your open folders is yours; one from another project is not.
+A container started with plain `docker run`, or by tooling that labels only the project
+name, carries no directory and stays unknown rather than being guessed at.
 
 Stopping one of these is a different operation from terminating a process, and it is
 treated as one. The row offers **Stop Container**, which asks the daemon to stop it and
 tells you it can be started again. Terminating the process is refused outright, because
 that process is the daemon and it holds every other container's ports too.
 
+The daemon is found the way the CLI finds it: `DOCKER_HOST` first, then your active
+`docker context`, then the usual socket locations for Docker Desktop, rootless Docker,
+Colima, OrbStack, Rancher Desktop and Podman's compatible API. Each candidate has to
+answer a real request before it is used, because a socket file left behind by a stopped
+daemon looks identical to a live one.
+
 Only a local socket or named pipe is used. A remote `DOCKER_HOST` is refused rather than
 followed: the extension makes no network requests, and a remote daemon's containers do not
 hold this machine's ports anyway.
+
+If Docker is running but its socket is somewhere this list does not cover, the panel says
+so rather than quietly showing you the daemon process.
 
 ### It comes to you when a port conflict happens
 

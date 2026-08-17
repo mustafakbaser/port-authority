@@ -30,21 +30,45 @@ const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
  * remembered too, with a backoff, so a machine without Docker does not pay for a
  * filesystem probe on every port scan.
  */
+export interface DockerClientOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly env?: { DOCKER_HOST?: string; XDG_RUNTIME_DIR?: string };
+  readonly home?: string;
+  readonly now?: () => number;
+  /** How long to wait before looking for a daemon again after failing to find one. */
+  readonly backoffMs?: number;
+  /** A liveness probe should fail fast; the daemon answers `/_ping` in a millisecond. */
+  readonly probeTimeoutMs?: number;
+  /**
+   * Where to look for a daemon, in order. Injected the way the port scanners take their
+   * command runner, so discovery can be exercised against a socket a test controls rather
+   * than whatever happens to exist on the machine running the suite.
+   */
+  readonly discover?: () => Promise<readonly DockerEndpoint[]>;
+}
+
 export class DockerClient {
   private endpoint: DockerEndpoint | undefined;
   private lastFailure: Extract<DockerEndpoint, { kind: 'unavailable' }> | undefined;
   private nextProbeAt = 0;
 
-  constructor(
-    private readonly platform: NodeJS.Platform = process.platform,
-    private readonly env: { DOCKER_HOST?: string } = process.env,
-    private readonly home: string | undefined = process.env.HOME ?? process.env.USERPROFILE,
-    private readonly now: () => number = Date.now,
-    /** How long to wait before looking for a daemon again after failing to find one. */
-    private readonly backoffMs = 60_000,
-    /** A liveness probe should fail fast; the daemon answers `/_ping` in a millisecond. */
-    private readonly probeTimeoutMs = 1500,
-  ) {}
+  private readonly platform: NodeJS.Platform;
+  private readonly env: { DOCKER_HOST?: string; XDG_RUNTIME_DIR?: string };
+  private readonly home: string | undefined;
+  private readonly now: () => number;
+  private readonly backoffMs: number;
+  private readonly probeTimeoutMs: number;
+  private readonly discover: () => Promise<readonly DockerEndpoint[]>;
+
+  constructor(options: DockerClientOptions = {}) {
+    this.platform = options.platform ?? process.platform;
+    this.env = options.env ?? process.env;
+    this.home = options.home ?? process.env.HOME ?? process.env.USERPROFILE;
+    this.now = options.now ?? Date.now;
+    this.backoffMs = options.backoffMs ?? 60_000;
+    this.probeTimeoutMs = options.probeTimeoutMs ?? 1500;
+    this.discover = options.discover ?? (() => this.discoverLocally());
+  }
 
   /** Forgets a cached failure so the next call probes again, e.g. after Docker was started. */
   reset(): void {
@@ -109,22 +133,21 @@ export class DockerClient {
       return this.lastFailure ?? { kind: 'unavailable', reason: 'notFound', message: 'No Docker socket was found.' };
     }
 
-    const { endpoint, candidates } = resolveDockerEndpoint(this.platform, this.env, this.home);
+    const options = await this.discover();
 
-    // An explicit DOCKER_HOST is authoritative. If it is unusable, say so rather than
-    // quietly falling through to a different daemon than the user asked for.
-    if (endpoint.kind === 'unavailable' && this.env.DOCKER_HOST) {
-      this.endpoint = endpoint;
-      return endpoint;
+    // A decision, not a transient failure: cached and never re-probed.
+    const decided = options.find(
+      (option) => option.kind === 'unavailable' && option.reason === 'remoteRefused',
+    );
+    if (decided) {
+      this.endpoint = decided;
+      return decided;
     }
-
-    // DOCKER_HOST and the named pipe are explicit answers; the candidate list is a guess.
-    // Either way every option is proved with a real request before it is remembered,
-    // because a socket file left behind by a stopped daemon passes every cheaper test.
-    const options: DockerEndpoint[] =
-      endpoint.kind === 'unavailable'
-        ? [...(await this.contextEndpoint()), ...candidates.map((path) => ({ kind: 'socket', path }) as const)]
-        : [endpoint];
+    const explicitFailure = options.length === 1 && options[0].kind === 'unavailable' ? options[0] : undefined;
+    if (explicitFailure) {
+      this.endpoint = explicitFailure;
+      return explicitFailure;
+    }
 
     let lastError: string | undefined;
     for (const option of options) {
@@ -148,6 +171,24 @@ export class DockerClient {
     };
     this.nextProbeAt = this.now() + this.backoffMs;
     return this.lastFailure;
+  }
+
+  /**
+   * The real discovery order: an explicit DOCKER_HOST, then the active docker context,
+   * then the per-platform candidate list.
+   */
+  private async discoverLocally(): Promise<readonly DockerEndpoint[]> {
+    const { endpoint, candidates } = resolveDockerEndpoint(this.platform, this.env, this.home);
+
+    // An explicit DOCKER_HOST is authoritative. If it is unusable, say so rather than
+    // quietly falling through to a different daemon than the user asked for.
+    if (this.env.DOCKER_HOST) {
+      return [endpoint];
+    }
+    if (endpoint.kind !== 'unavailable') {
+      return [endpoint];
+    }
+    return [...(await this.contextEndpoint()), ...candidates.map((path) => ({ kind: 'socket', path }) as const)];
   }
 
   /**

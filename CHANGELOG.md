@@ -21,10 +21,29 @@ Only a local socket or named pipe is used, and a remote `DOCKER_HOST` is refused
 extension promises it makes no network requests, and a remote daemon does not own this
 machine's ports.
 
+The daemon is found the way the CLI finds it: `DOCKER_HOST`, then the active docker
+context, then the socket locations used by Docker Desktop, rootless Docker, Docker Desktop
+for Linux, Colima, OrbStack, Rancher Desktop and Podman. Each candidate must answer a real
+request before it is used, because a socket file left behind by a stopped daemon is
+indistinguishable from a live one by any cheaper test.
+
 ### Fixed
 
 Ports published by a container used to be labelled FOREIGN on the strength of the Docker
-daemon's own working directory, which says nothing about the container.
+daemon's own working directory, which says nothing about the container. The tooltip on a
+container row described the daemon for the same reason.
+
+The port conflict notification could still offer to terminate the Docker daemon, which
+holds every published port on the machine. It now names the container and offers to stop
+it. The rule that decides whether a container belongs to a row lives in one place, so the
+tree, the palette and the notification cannot disagree about it again.
+
+A process record with a pid but no name, which Windows produces for a process owned by
+another account and Linux produces when `/proc` is unreadable, was read as evidence that
+Docker was not the holder. Paused and restarting containers were treated as having
+released their ports. Two containers sharing a host port on different addresses were
+resolved by array order. Compose metadata was discarded entirely unless the service label
+was present, which loses the project directory that ownership depends on.
 
 ### Still planned for 0.2
 

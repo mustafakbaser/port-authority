@@ -36,7 +36,7 @@
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "Port listing works in restricted mode. Reading workspace files to infer expected ports, and workspace-level terminate settings, are disabled until you trust the folder.",
+      "description": "Port listing and the Docker container view work in restricted mode, since both read only operating system and daemon state. Reading workspace files to infer expected ports, and workspace-level terminate settings, are disabled until you trust the folder.",
       "restrictedConfigurations": [
         "portAuthority.workspaceExpectations.enabled",
         "portAuthority.workspaceExpectations.additionalPorts",
