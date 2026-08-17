@@ -72,10 +72,18 @@ export function buildModel(
     if (!containerIndex) {
       return undefined;
     }
-    if (entry.process && !isDockerProcess(entry.process.name)) {
+    // Reject only when the holder is *known* and is not Docker. An unnamed record is not
+    // evidence of anything: Windows emits `{ pid }` with no name for a process owned by
+    // another account, and Linux does the same when /proc is unreadable. Treating that as
+    // "not Docker" put Terminate Process back on a container row, aimed at the daemon.
+    if (entry.process?.name && !isDockerProcess(entry.process.name)) {
       return undefined;
     }
-    return findContainerForHostPort(containerIndex, entry.port);
+    return findContainerForHostPort(
+      containerIndex,
+      entry.port,
+      entry.bindings.map((binding) => binding.address),
+    );
   };
 
   const containersByEntry = new Map<PortEntry, ContainerInfo>();

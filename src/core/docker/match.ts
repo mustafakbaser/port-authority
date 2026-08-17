@@ -24,25 +24,55 @@ export function indexContainersByHostPort(containers: readonly ContainerInfo[]):
 }
 
 /**
+ * States in which a container still holds its published host ports.
+ *
+ * `running` is not enough. A paused container keeps its bindings, and a restarting one
+ * reclaims them; the unfiltered `/containers/json` this client calls returns both.
+ * Treating them as absent sent the row back to the Docker daemon, which removed the Stop
+ * Container action and put Terminate Process back in its place.
+ */
+const PORT_HOLDING_STATES: readonly string[] = ['running', 'paused', 'restarting'];
+
+export function holdsItsPorts(container: ContainerInfo): boolean {
+  return PORT_HOLDING_STATES.includes(container.state);
+}
+
+/** Wildcard binds, which answer on every address the scan could have observed. */
+function isWildcard(address: string): boolean {
+  return address === '' || address === '*' || address === '0.0.0.0' || address === '::';
+}
+
+/**
  * Finds the container publishing a host port.
  *
- * Two containers cannot hold the same host port at once, so the ambiguous case only
- * arises when the daemon's view is momentarily stale — one container stopping while
- * another starts. When that happens the running one is the honest answer, and if neither
- * is running the mapping is dropped rather than guessed.
+ * Two containers can legitimately share a host port number on different addresses, for
+ * example `0.0.0.0:9000` and `127.0.0.1:9000`, so the port alone does not always identify
+ * one. When the scan tells us which addresses it saw, that disambiguates. When it cannot,
+ * this returns nothing rather than picking by array order: a wrong container name on a row
+ * that offers to stop it is worse than no container name at all.
  */
 export function findContainerForHostPort(
   index: ContainerPortIndex,
   hostPort: number,
+  observedAddresses: readonly string[] = [],
 ): ContainerInfo | undefined {
-  const candidates = index.get(hostPort);
-  if (!candidates || candidates.length === 0) {
+  const candidates = (index.get(hostPort) ?? []).filter(holdsItsPorts);
+  if (candidates.length === 0) {
     return undefined;
   }
   if (candidates.length === 1) {
-    return candidates[0].state === 'running' ? candidates[0] : undefined;
+    return candidates[0];
   }
-  return candidates.find((container) => container.state === 'running');
+
+  const matchesObserved = candidates.filter((container) =>
+    container.bindings.some(
+      (binding) =>
+        binding.hostPort === hostPort &&
+        (isWildcard(binding.hostIp) ||
+          observedAddresses.some((address) => isWildcard(address) || address === binding.hostIp)),
+    ),
+  );
+  return matchesObserved.length === 1 ? matchesObserved[0] : undefined;
 }
 
 /**
@@ -105,9 +135,12 @@ export function isDockerProcess(name: string | undefined): boolean {
  * a name that already contains the project.
  */
 export function describeContainer(container: ContainerInfo): string {
-  if (container.compose) {
-    return `${container.compose.project}/${container.compose.service}`;
+  const service = container.compose?.service;
+  if (service) {
+    return `${container.compose!.project}/${service}`;
   }
+  // Tooling that labels only the project leaves the container name as the clearest label,
+  // and it usually already carries the project inside it.
   return container.name;
 }
 

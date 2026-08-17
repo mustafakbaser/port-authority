@@ -19,7 +19,8 @@ export interface ContainerPortBinding {
 /** Compose puts these on every container it starts, and they are what make ownership work. */
 export interface ComposeMetadata {
   readonly project: string;
-  readonly service: string;
+  /** Absent for tooling that labels only the project, such as the Supabase CLI. */
+  readonly service?: string;
   /** Absolute path of the directory holding the compose file, when Compose recorded it. */
   readonly workingDir?: string;
   readonly configFile?: string;

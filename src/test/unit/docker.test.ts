@@ -316,3 +316,87 @@ describe('joining containers into the port model', () => {
     assert.equal(model.expectations[0].status, 'held-by-workspace');
   });
 });
+
+describe('regressions found in review', () => {
+  const FOLDER = '/home/dev/shop';
+  const context = { workspaceFolders: [FOLDER], caseInsensitive: false };
+  const row = (port: number, process?: { pid: number; name?: string }): PortEntry => ({
+    port,
+    ...(process ? { process } : {}),
+    bindings: [{ address: '*', family: 'ipv4', scope: 'any' }],
+    scope: 'any',
+  });
+
+  /**
+   * Windows reports `{ pid }` with no name for a process owned by another account, and
+   * Linux does the same when /proc is unreadable. Reading that as "not Docker" dropped the
+   * container, which put Terminate Process back on the row, aimed at the daemon.
+   */
+  it('does not treat an unnamed process as evidence that Docker is absent', () => {
+    assert.equal(buildModel([row(6379, { pid: 4242 })], [], context, containers).all[0].container?.name, 'shop-cache-1');
+    assert.equal(buildModel([row(6379)], [], context, containers).all[0].container?.name, 'shop-cache-1');
+  });
+
+  it('still refuses to attach a container to a named process that is not Docker', () => {
+    assert.equal(buildModel([row(6379, { pid: 4242, name: 'node' })], [], context, containers).all[0].container, undefined);
+  });
+
+  /** A paused container keeps its bindings, and a restarting one reclaims them. */
+  it('keeps a container that still holds its ports', () => {
+    for (const state of ['running', 'paused', 'restarting']) {
+      const one = parseContainers([
+        { Id: 'a'.repeat(64), Names: ['/x'], State: state, Ports: [{ IP: '0.0.0.0', PrivatePort: 80, PublicPort: 9111, Type: 'tcp' }] },
+      ]);
+      assert.ok(findContainerForHostPort(indexContainersByHostPort(one), 9111), state);
+    }
+  });
+
+  it('drops a container that has released them', () => {
+    for (const state of ['exited', 'dead', 'created']) {
+      const one = parseContainers([
+        { Id: 'a'.repeat(64), Names: ['/x'], State: state, Ports: [{ IP: '0.0.0.0', PrivatePort: 80, PublicPort: 9111, Type: 'tcp' }] },
+      ]);
+      assert.equal(findContainerForHostPort(indexContainersByHostPort(one), 9111), undefined, state);
+    }
+  });
+
+  /** Two containers can share a port number on different addresses. */
+  it('disambiguates two containers on one port by the address the scan saw', () => {
+    const two = parseContainers([
+      { Id: 'a'.repeat(64), Names: ['/loopback'], State: 'running', Ports: [{ IP: '127.0.0.1', PrivatePort: 80, PublicPort: 9000, Type: 'tcp' }] },
+      { Id: 'b'.repeat(64), Names: ['/lan'], State: 'running', Ports: [{ IP: '192.168.1.5', PrivatePort: 80, PublicPort: 9000, Type: 'tcp' }] },
+    ]);
+    const index = indexContainersByHostPort(two);
+    assert.equal(findContainerForHostPort(index, 9000, ['127.0.0.1'])?.name, 'loopback');
+    assert.equal(findContainerForHostPort(index, 9000, ['192.168.1.5'])?.name, 'lan');
+  });
+
+  it('names neither when the address cannot tell them apart', () => {
+    const two = parseContainers([
+      { Id: 'a'.repeat(64), Names: ['/one'], State: 'running', Ports: [{ IP: '0.0.0.0', PrivatePort: 80, PublicPort: 9000, Type: 'tcp' }] },
+      { Id: 'b'.repeat(64), Names: ['/two'], State: 'running', Ports: [{ IP: '::', PrivatePort: 80, PublicPort: 9000, Type: 'tcp' }] },
+    ]);
+    // Guessing here would put a confident, wrong name on a row that offers to stop it.
+    assert.equal(findContainerForHostPort(indexContainersByHostPort(two), 9000, ['*']), undefined);
+  });
+
+  /** The Supabase CLI labels the project and nothing else. */
+  it('keeps the project directory when only the project label is present', () => {
+    const [only] = parseContainers([
+      {
+        Id: 'c'.repeat(64),
+        Names: ['/supabase_kong_shop'],
+        State: 'running',
+        Ports: [{ IP: '0.0.0.0', PrivatePort: 8000, PublicPort: 54321, Type: 'tcp' }],
+        Labels: {
+          'com.docker.compose.project': 'shop',
+          'com.docker.compose.project.working_dir': FOLDER,
+        },
+      },
+    ]);
+    assert.equal(only.compose?.project, 'shop');
+    assert.equal(only.compose?.service, undefined);
+    assert.equal(containerBelongsToWorkspace(only, [FOLDER], false), true);
+    assert.equal(describeContainer(only), 'supabase_kong_shop', 'no service, so the name is the label');
+  });
+});

@@ -63,19 +63,28 @@ export function parseContainers(payload: unknown): ContainerInfo[] {
   return containers;
 }
 
+/**
+ * Reads the Compose labels.
+ *
+ * Only `project` is required. Requiring `service` as well used to discard the whole
+ * record, including the project directory that ownership depends on, and the shape that
+ * triggers it is not rare: the Supabase CLI labels every container it starts with the
+ * project alone, which was eleven of the seventeen containers on the machine this was
+ * developed against.
+ */
 function readCompose(labels: Record<string, unknown>): ComposeMetadata | undefined {
   const project = asString(labels[COMPOSE_PROJECT]);
-  const service = asString(labels[COMPOSE_SERVICE]);
-  if (!project || !service) {
+  if (!project) {
     return undefined;
   }
+  const service = asString(labels[COMPOSE_SERVICE]);
   const workingDir = asString(labels[COMPOSE_WORKING_DIR]);
   // `config_files` can hold several paths separated by commas; the first is the one that
   // names the project directory.
   const configFile = asString(labels[COMPOSE_CONFIG_FILES])?.split(',')[0]?.trim();
   return {
     project,
-    service,
+    ...(service ? { service } : {}),
     ...(workingDir ? { workingDir } : {}),
     ...(configFile ? { configFile } : {}),
   };
