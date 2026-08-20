@@ -1,12 +1,15 @@
 import * as os from 'node:os';
 import * as vscode from 'vscode';
 import { buildModel, type ExpectationRow, type PortModel, type PortRow } from '../core/model.js';
+import { describeContainer, isDockerProcess } from '../core/docker/match.js';
+import type { ContainerInfo } from '../core/docker/types.js';
 import type { PortEntry } from '../core/ports/scanner.js';
 import type { OwnershipBasis } from '../core/ownership.js';
 import type { Ownership, ScanWarning } from '../core/types.js';
 import { isCaseInsensitivePlatform, tildify } from '../core/util/paths.js';
 import { formatAge } from '../core/util/time.js';
 import { currentSettings } from './config.js';
+import type { DockerService } from './dockerService.js';
 import type { ExpectationService } from './expectationService.js';
 import type { PortService } from './portService.js';
 
@@ -57,6 +60,11 @@ export function entryOf(node: ActionableNode): PortEntry | undefined {
   return node.row.entry;
 }
 
+/** The container publishing this row's port, when Docker owns it rather than a process. */
+export function containerOf(node: ActionableNode): ContainerInfo | undefined {
+  return node.row.container;
+}
+
 export function portOf(node: ActionableNode): number {
   return node.kind === 'port' ? node.row.entry.port : node.row.expectation.port;
 }
@@ -76,6 +84,7 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
   constructor(
     private readonly ports: PortService,
     private readonly expectations: ExpectationService,
+    private readonly docker: DockerService,
   ) {}
 
   refresh(): void {
@@ -150,6 +159,17 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
       });
     }
 
+    const dockerProblem = this.dockerProblem();
+    if (dockerProblem) {
+      nodes.push({
+        kind: 'message',
+        id: 'docker-unavailable',
+        label: dockerProblem.label,
+        severity: 'warning',
+        tooltip: dockerProblem.detail,
+      });
+    }
+
     const model = this.model();
 
     if (model.all.length === 0) {
@@ -189,11 +209,46 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     return nodes;
   }
 
+  /**
+   * Whether to tell the user the Docker integration is not working.
+   *
+   * Deliberately quiet in the common cases. Someone who does not use Docker should never
+   * see a row about it, and someone who switched it off asked for that. `notFound` is the
+   * ambiguous one: it means either Docker is not installed, or it is installed somewhere
+   * this extension did not look. Those are told apart by the scan itself, because a
+   * running daemon holds ports under a name we recognise. Only then is there something
+   * worth saying.
+   */
+  private dockerProblem(): { label: string; detail: string } | undefined {
+    const unavailable = this.docker.snapshot.unavailable;
+    if (!unavailable || unavailable.reason === 'disabled') {
+      return undefined;
+    }
+    if (unavailable.reason === 'notFound') {
+      const dockerHoldsAPort = this.ports.snapshot.entries.some((entry) =>
+        isDockerProcess(entry.process?.name),
+      );
+      if (!dockerHoldsAPort) {
+        return undefined;
+      }
+      return {
+        label: 'Docker is running but its socket could not be found',
+        detail: `${unavailable.message}\n\nPorts below are published by Docker, so the daemon is running. Set DOCKER_HOST to its socket, or open an issue naming the runtime you use.`,
+      };
+    }
+    return { label: 'The Docker container list is unavailable', detail: unavailable.message };
+  }
+
   model(): PortModel {
-    return buildModel(this.ports.snapshot.entries, this.expectations.snapshot.expectations, {
-      workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
-      caseInsensitive: isCaseInsensitivePlatform(),
-    });
+    return buildModel(
+      this.ports.snapshot.entries,
+      this.expectations.snapshot.expectations,
+      {
+        workspaceFolders: (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
+        caseInsensitive: isCaseInsensitivePlatform(),
+      },
+      this.docker.snapshot.containers,
+    );
   }
 
   private groupItem(node: GroupNode): vscode.TreeItem {
@@ -225,34 +280,45 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     const item = new vscode.TreeItem(String(expectation.port), vscode.TreeItemCollapsibleState.None);
     item.id = `expectation:${expectation.folder}:${expectation.port}`;
 
+    const container = node.row.container;
     const parts: string[] = [expectation.label];
-    if (entry?.process) {
+    if (container) {
+      parts.push(describeContainerRow(container));
+    } else if (entry?.process) {
       parts.push(describeProcess(entry, this.home));
     }
     if (status === 'free') {
       parts.push('not running');
     } else {
       parts.push(OWNERSHIP_LABEL[ownership]);
-      const age = formatAge(entry?.process?.startedAt, Date.now());
-      if (age) {
-        parts.push(age);
+      if (!container) {
+        const age = formatAge(entry?.process?.startedAt, Date.now());
+        if (age) {
+          parts.push(age);
+        }
       }
     }
     item.description = parts.join(' · ');
-    item.tooltip = this.tooltip(node.row.entry, expectation.port, ownership, node.row.basis, {
+    item.tooltip = this.tooltip(node.row.entry, expectation.port, ownership, node.row.basis, container, {
       label: expectation.label,
       file: expectation.source.file,
       hint: expectation.source.hint,
     });
-    item.iconPath = statusIcon(status);
-    item.contextValue = entry?.process?.pid
-      ? 'port.listening:expected:killable'
-      : entry
-        ? 'port.listening:expected'
-        : 'port.expected.free';
+    item.iconPath = container ? containerIcon(status) : statusIcon(status);
+    item.contextValue = container
+      ? 'port.listening:expected:container'
+      : entry?.process?.pid
+        ? 'port.listening:expected:killable'
+        : entry
+          ? 'port.listening:expected'
+          : 'port.expected.free';
     item.accessibilityInformation = {
       label: `Port ${expectation.port}, ${expectation.label}, ${
-        status === 'free' ? 'not running' : `held by ${OWNERSHIP_LABEL[ownership]}`
+        status === 'free'
+          ? 'not running'
+          : container
+            ? `container ${describeContainer(container)}, ${OWNERSHIP_LABEL[ownership]}`
+            : `held by ${OWNERSHIP_LABEL[ownership]}`
       }`,
     };
     return item;
@@ -263,10 +329,13 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     const item = new vscode.TreeItem(String(entry.port), vscode.TreeItemCollapsibleState.None);
     item.id = `port:${entry.port}:${entry.process?.pid ?? 'unknown'}`;
 
-    const parts = [describeProcess(entry, this.home)];
-    const age = formatAge(entry.process?.startedAt, Date.now());
-    if (age) {
-      parts.push(age);
+    const container = node.row.container;
+    const parts = [container ? describeContainerRow(container) : describeProcess(entry, this.home)];
+    if (!container) {
+      const age = formatAge(entry.process?.startedAt, Date.now());
+      if (age) {
+        parts.push(age);
+      }
     }
     if (ownership === 'foreign') {
       parts.push(OWNERSHIP_LABEL.foreign);
@@ -277,12 +346,19 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
       entry.port,
       ownership,
       node.row.basis,
+      container,
       expectation ? { label: expectation.label } : undefined,
     );
-    item.iconPath = ownershipIcon(ownership, entry.scope);
-    item.contextValue = entry.process?.pid ? 'port.listening:killable' : 'port.listening';
+    item.iconPath = container ? containerOwnershipIcon(ownership) : ownershipIcon(ownership, entry.scope);
+    item.contextValue = container
+      ? 'port.listening:container'
+      : entry.process?.pid
+        ? 'port.listening:killable'
+        : 'port.listening';
     item.accessibilityInformation = {
-      label: `Port ${entry.port}, ${entry.process?.name ?? 'unknown process'}, ${OWNERSHIP_LABEL[ownership]}`,
+      label: `Port ${entry.port}, ${
+        container ? `container ${describeContainer(container)}` : (entry.process?.name ?? 'unknown process')
+      }, ${OWNERSHIP_LABEL[ownership]}`,
     };
     return item;
   }
@@ -292,6 +368,7 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
     port: number,
     ownership: Ownership,
     basis: OwnershipBasis,
+    container: ContainerInfo | undefined,
     expectation?: { label: string; file?: string; hint?: string },
   ): vscode.MarkdownString {
     const markdown = new vscode.MarkdownString();
@@ -313,6 +390,34 @@ export class PortTreeDataProvider implements vscode.TreeDataProvider<TreeNode> {
 
     if (!entry) {
       markdown.appendMarkdown('_Nothing is listening on this port._');
+      return markdown;
+    }
+
+    // A container row must not describe the daemon. Its pid, its working directory and
+    // its command line are identical on every published port and say nothing about the
+    // container the user is looking at.
+    if (container) {
+      const composeRows: [string, string | undefined][] = [
+        ['Container', `${container.name} (${container.shortId})`],
+        ['Image', container.image],
+        ['Compose', container.compose ? [container.compose.project, container.compose.service].filter(Boolean).join(' / ') : undefined],
+        ['Project', tildify(container.compose?.workingDir, this.home)],
+        ['State', container.status || container.state],
+        [
+          'Published',
+          container.bindings
+            .filter((binding) => binding.hostPort === port)
+            .map((binding) => `${binding.hostIp}:${binding.hostPort} → ${binding.containerPort}`)
+            .join(', '),
+        ],
+        ['Ownership', describeOwnership(ownership, basis)],
+      ];
+      for (const [label, value] of composeRows) {
+        if (value) {
+          markdown.appendMarkdown(`- **${label}:** ${escapeMarkdown(value)}\n`);
+        }
+      }
+      markdown.appendMarkdown('\nStopping this frees the port and can be undone with `docker start`.\n');
       return markdown;
     }
 
@@ -376,6 +481,49 @@ function warningNode(warning: ScanWarning): MessageNode {
   };
 }
 
+/**
+ * A container row reads as the thing the user recognises: the compose service or the
+ * container name, the image behind it, and the daemon's own uptime phrase. The pid is
+ * left out on purpose, because it is the daemon's pid and it is the same on every row.
+ */
+function describeContainerRow(container: ContainerInfo): string {
+  const parts = [describeContainer(container), container.image];
+  if (container.status) {
+    parts.push(container.status.toLowerCase());
+  }
+  return parts.join(' · ');
+}
+
+function containerIcon(status: ExpectationRow['status']): vscode.ThemeIcon {
+  return status === 'free'
+    ? new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('disabledForeground'))
+    : new vscode.ThemeIcon('package', new vscode.ThemeColor(statusColour(status)));
+}
+
+function containerOwnershipIcon(ownership: Ownership): vscode.ThemeIcon {
+  return new vscode.ThemeIcon(
+    'package',
+    new vscode.ThemeColor(
+      ownership === 'workspace'
+        ? 'charts.green'
+        : ownership === 'foreign'
+          ? 'list.warningForeground'
+          : 'descriptionForeground',
+    ),
+  );
+}
+
+function statusColour(status: ExpectationRow['status']): string {
+  switch (status) {
+    case 'held-by-workspace':
+      return 'charts.green';
+    case 'held-by-foreign':
+      return 'list.warningForeground';
+    default:
+      return 'charts.blue';
+  }
+}
+
 function describeProcess(entry: PortEntry, home: string): string {
   const info = entry.process;
   if (!info) {
@@ -410,6 +558,10 @@ function ownershipIcon(ownership: Ownership, scope: PortEntry['scope']): vscode.
 }
 
 function describeOwnership(ownership: Ownership, basis: OwnershipBasis): string {
+  if (basis === 'container') {
+    // Say where the verdict came from: the compose project directory, not the daemon.
+    return `${OWNERSHIP_LABEL[ownership]} (from the compose project directory)`;
+  }
   if (ownership === 'workspace' && basis === 'commandLine') {
     // Say so: this verdict comes from a path appearing in argv, not from a real cwd.
     return 'this workspace (inferred from the command line)';

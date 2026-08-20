@@ -90,6 +90,12 @@ const HIGH_RISK_PROCESS_NAMES: readonly string[] = [
   'dockerd',
   'docker',
   'com.docker.backend',
+  'docker desktop backend',
+  // Holds the published port itself on Linux with the default userland proxy. Signalling
+  // it leaves the container running while its host mapping silently disappears.
+  'docker-proxy',
+  'rootlesskit',
+  'rootlessport',
   'containerd-shim',
   'postgres',
   'postgresql',

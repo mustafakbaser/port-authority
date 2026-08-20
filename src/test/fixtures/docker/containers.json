@@ -1,0 +1,88 @@
+[
+  {
+    "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678901234567890abcdefabcdef",
+    "Names": ["/shop-cache-1"],
+    "Image": "redis:7-alpine",
+    "State": "running",
+    "Status": "Up 2 days",
+    "Ports": [
+      { "IP": "0.0.0.0", "PrivatePort": 6379, "PublicPort": 6379, "Type": "tcp" },
+      { "IP": "::", "PrivatePort": 6379, "PublicPort": 6379, "Type": "tcp" }
+    ],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "cache",
+      "com.docker.compose.project.working_dir": "/home/dev/shop",
+      "com.docker.compose.project.config_files": "/home/dev/shop/compose.yml",
+      "com.docker.compose.container-number": "1"
+    }
+  },
+  {
+    "Id": "b2c3d4e5f6071829a3b4c5d6e7f80912345678901234567890abcdefabcdef01",
+    "Names": ["/shop-edge-1"],
+    "Image": "caddy:2-alpine",
+    "State": "running",
+    "Status": "Up 5 minutes",
+    "Ports": [{ "IP": "127.0.0.1", "PrivatePort": 80, "PublicPort": 8097, "Type": "tcp" }],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "edge",
+      "com.docker.compose.project.working_dir": "/home/dev/shop",
+      "com.docker.compose.project.config_files": "/home/dev/shop/compose.yml"
+    }
+  },
+  {
+    "Id": "c3d4e5f6071829a3b4c5d6e7f8091a2345678901234567890abcdefabcdef012",
+    "Names": ["/standalone-proxy"],
+    "Image": "caddy:2-alpine",
+    "State": "running",
+    "Status": "Up 18 seconds",
+    "Ports": [
+      { "IP": "0.0.0.0", "PrivatePort": 80, "PublicPort": 8099, "Type": "tcp" },
+      { "IP": "::", "PrivatePort": 80, "PublicPort": 8099, "Type": "tcp" }
+    ],
+    "Labels": {}
+  },
+  {
+    "Id": "d4e5f6071829a3b4c5d6e7f8091a2b345678901234567890abcdefabcdef0123",
+    "Names": ["/shop-queue-1"],
+    "Image": "redis:7-alpine",
+    "State": "running",
+    "Status": "Up 2 days",
+    "Ports": [
+      { "IP": "0.0.0.0", "PrivatePort": 6379, "PublicPort": 6380, "Type": "tcp" },
+      { "IP": "::", "PrivatePort": 6379, "PublicPort": 6380, "Type": "tcp" }
+    ],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "queue",
+      "com.docker.compose.project.working_dir": "/home/dev/shop"
+    }
+  },
+  {
+    "Id": "e5f6071829a3b4c5d6e7f8091a2b3c45678901234567890abcdefabcdef01234",
+    "Names": ["/shop-php-1"],
+    "Image": "shop-php",
+    "State": "running",
+    "Status": "Up 2 days",
+    "Ports": [{ "IP": "", "PrivatePort": 9000, "Type": "tcp" }],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "php",
+      "com.docker.compose.project.working_dir": "/home/dev/shop"
+    }
+  },
+  {
+    "Id": "f6071829a3b4c5d6e7f8091a2b3c4d5678901234567890abcdefabcdef012345",
+    "Names": ["/shop-old-cache-1"],
+    "Image": "redis:6-alpine",
+    "State": "exited",
+    "Status": "Exited (0) 3 hours ago",
+    "Ports": [],
+    "Labels": {
+      "com.docker.compose.project": "shop",
+      "com.docker.compose.service": "old-cache",
+      "com.docker.compose.project.working_dir": "/home/dev/shop"
+    }
+  }
+]

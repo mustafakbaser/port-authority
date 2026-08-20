@@ -18,6 +18,8 @@ export interface Settings {
   readonly watchDebugConsole: boolean;
   readonly eaddrinuseCooldownMs: number;
   readonly scanTimeoutMs: number;
+  readonly dockerEnabled: boolean;
+  readonly dockerTimeoutMs: number;
 }
 
 export interface FolderSettings {
@@ -63,6 +65,8 @@ export function readSettings(): Settings {
     watchDebugConsole: config.get<boolean>('eaddrinuse.watchDebugConsole', true),
     eaddrinuseCooldownMs: clamp(config.get<number>('eaddrinuse.cooldownSeconds', 60), 5, 3600) * 1000,
     scanTimeoutMs: clamp(config.get<number>('scan.timeoutMs', 5000), 500, 60000),
+    dockerEnabled: config.get<boolean>('docker.enabled', true),
+    dockerTimeoutMs: clamp(config.get<number>('docker.timeoutMs', 3000), 250, 30000),
   };
 }
 
