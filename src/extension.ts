@@ -32,6 +32,8 @@ const FIRST_SCAN_DELAY_MS = 4_000;
 export interface PortAuthorityApi {
   getExpectedPortsForTests(): number[];
   getListeningPortsForTests(): number[];
+  /** Host port to the container publishing it, as the tree would show it. */
+  getContainerPortsForTests(): { port: number; container: string; image: string }[];
 }
 
 /**
@@ -150,6 +152,15 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
     getExpectedPortsForTests: () =>
       expectations.snapshot.expectations.map((expectation) => expectation.port),
     getListeningPortsForTests: () => ports.snapshot.entries.map((entry) => entry.port),
+    getContainerPortsForTests: () =>
+      tree
+        .model()
+        .all.filter((row) => row.container)
+        .map((row) => ({
+          port: row.entry.port,
+          container: row.container!.name,
+          image: row.container!.image,
+        })),
   };
 }
 
