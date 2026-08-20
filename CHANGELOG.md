@@ -4,6 +4,13 @@ Notable changes, newest first. This project follows [semantic versioning](https:
 
 ## Unreleased
 
+Planned:
+
+- Probe open ports over HTTP so they can be labelled by whatever answers.
+- Find dev servers still running from projects you closed days ago.
+
+## 0.2.0
+
 ### Added
 
 Container awareness. Ports published by Docker are shown as the container that publishes
@@ -45,10 +52,20 @@ released their ports. Two containers sharing a host port on different addresses 
 resolved by array order. Compose metadata was discarded entirely unless the service label
 was present, which loses the project directory that ownership depends on.
 
-### Still planned for 0.2
+### Notes
 
-- Probe open ports over HTTP so they can be labelled by whatever answers.
-- Find dev servers still running from projects you closed days ago.
+The container work was reviewed adversarially before release, the same way 0.1.0 was, and
+six defects came out of it. The port conflict notification, which is the path users reach
+most often, could still offer to terminate the Docker daemon and take every container down
+with it. A process record carrying a pid but no name, which Windows produces for a process
+owned by another account, was read as proof that Docker was not the holder. Endpoint
+selection took the first path that was a socket file, so a socket left behind by a stopped
+daemon permanently shadowed a live one. `DOCKER_HOST=unix://` produced an empty path, and
+Node treats a falsy socket path as absent and dials `localhost:80`, which would have been a
+real network request from an extension that promises none.
+
+All of them are fixed, each with a regression test, and the layer they were found in went
+from no tests to being covered against a real socket.
 
 ## 0.1.1
 
