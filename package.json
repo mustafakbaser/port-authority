@@ -2,7 +2,7 @@
   "name": "port-authority",
   "displayName": "Port Authority",
   "description": "Find out which process is holding a port, and stop it safely. Workspace-aware, with automatic EADDRINUSE detection.",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "license": "MIT",
   "publisher": "mkbaser",
   "author": {
