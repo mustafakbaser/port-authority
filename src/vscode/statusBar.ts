@@ -55,12 +55,15 @@ export class PortStatusBar implements vscode.Disposable {
 
     const lines = model.expectations.map((row) => {
       const marker = row.status === 'free' ? '○' : row.status === 'held-by-foreign' ? '⚠' : '●';
+      const holder = row.container
+        ? `container ${row.container.name}`
+        : `PID ${row.entry?.process?.pid ?? '?'}`;
       const suffix =
         row.status === 'free'
           ? 'not running'
           : row.status === 'held-by-foreign'
-            ? `held by a foreign process (PID ${row.entry?.process?.pid ?? '?'})`
-            : `PID ${row.entry?.process?.pid ?? '?'}`;
+            ? `held by another project, ${holder}`
+            : holder;
       return `${marker} \`${row.expectation.port}\` ${row.expectation.label.replace(/`/g, '\u02cb')} — ${suffix}`;
     });
 

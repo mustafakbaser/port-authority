@@ -52,6 +52,40 @@ Every expectation is traceable. Hover a row and it will tell you it came from `s
 
 The rules for reading those files are narrow on purpose. `-p` counts as a port flag for `next`, `vite`, `serve` and about thirty other dev servers, and not for `mkdir -p 1234`. A `DATABASE_URL` pointing at `localhost` counts, one pointing at your production host does not. `.env.example` and `.env.production` are skipped entirely. I would rather miss a port than invent one, because a workspace section full of things that will never be running is worse than no workspace section.
 
+### It knows which container is behind a port
+
+Every port Docker publishes is held by the same daemon process, so a plain port list shows
+several rows of `com.docker.backend` sharing one pid. Port Authority asks the local daemon
+which container publishes each port and shows that instead:
+
+```
+⚠ 6379  redis-queue   shop/cache · redis:7-alpine · up 2 days · FOREIGN
+```
+
+Ownership works the same way it does for a process, when Compose recorded where the
+project lives. Compose writes a `project.working_dir` label, and a container whose project
+directory sits inside one of your open folders is yours; one from another project is not.
+A container started with plain `docker run`, or by tooling that labels only the project
+name, carries no directory and stays unknown rather than being guessed at.
+
+Stopping one of these is a different operation from terminating a process, and it is
+treated as one. The row offers **Stop Container**, which asks the daemon to stop it and
+tells you it can be started again. Terminating the process is refused outright, because
+that process is the daemon and it holds every other container's ports too.
+
+The daemon is found the way the CLI finds it: `DOCKER_HOST` first, then your active
+`docker context`, then the usual socket locations for Docker Desktop, rootless Docker,
+Colima, OrbStack, Rancher Desktop and Podman's compatible API. Each candidate has to
+answer a real request before it is used, because a socket file left behind by a stopped
+daemon looks identical to a live one.
+
+Only a local socket or named pipe is used. A remote `DOCKER_HOST` is refused rather than
+followed: the extension makes no network requests, and a remote daemon's containers do not
+hold this machine's ports anyway.
+
+If Docker is running but its socket is somewhere this list does not cover, the panel says
+so rather than quietly showing you the daemon process.
+
 ### It comes to you when a port conflict happens
 
 When `EADDRINUSE` shows up in a terminal or in the debug console, you get a notification that already knows the answer:
@@ -101,6 +135,8 @@ Every feature can be switched off on its own.
 | `portAuthority.statusBar.enabled` | `true` | The `2/4` summary of expected ports |
 | `portAuthority.workspaceExpectations.enabled` | `true` | Read `package.json` and `.env` to infer expected ports |
 | `portAuthority.workspaceExpectations.additionalPorts` | `[]` | Extra ports, e.g. `[{ "port": 9229, "label": "debugger" }]` |
+| `portAuthority.docker.enabled` | `true` | Ask the local Docker daemon which container publishes each port |
+| `portAuthority.docker.timeoutMs` | `3000` | Timeout for one request to the daemon |
 | `portAuthority.eaddrinuse.enabled` | `true` | Watch terminal output for port conflicts |
 | `portAuthority.eaddrinuse.watchDebugConsole` | `true` | Watch debug session output too |
 | `portAuthority.eaddrinuse.cooldownSeconds` | `60` | Minimum gap before the same port notifies again |
@@ -137,7 +173,6 @@ In Restricted Mode no workspace file is read at all, and a port conflict notific
 
 ## What it does not do yet
 
-- Container ports show up as the Docker backend process rather than the container that owns them. Mapping them properly is the main thing planned for 0.2.
 - Nothing is probed over HTTP, so port 3000 is not labelled "Next.js dev server".
 - Without elevation, macOS and Linux hide the details of processes you do not own. The port is still listed, with a row explaining why the owner is blank.
 - Windows does not expose another process's working directory cheaply, so ownership there falls back to matching the workspace path inside the command line. That is shown as indirect evidence and is never enough to skip a confirmation.

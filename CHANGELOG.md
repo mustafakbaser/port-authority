@@ -4,9 +4,49 @@ Notable changes, newest first. This project follows [semantic versioning](https:
 
 ## Unreleased
 
-Planned for 0.2:
+### Added
 
-- Map published container ports to the Docker container that owns them, instead of showing the Docker backend process.
+Container awareness. Ports published by Docker are shown as the container that publishes
+them, with its image and uptime, instead of several identical rows of the daemon process.
+Ownership uses the Compose project directory, so a container started by a compose file in
+one of your open folders is recognised as yours by the same containment rule that applies
+to a process working directory.
+
+Container rows offer **Stop Container** rather than terminate. The process behind them is
+the Docker daemon, which holds every other published port, so signalling it is refused.
+Stopping a container is reversible and the confirmation says so instead of borrowing the
+irreversible warning used for processes.
+
+Only a local socket or named pipe is used, and a remote `DOCKER_HOST` is refused. The
+extension promises it makes no network requests, and a remote daemon does not own this
+machine's ports.
+
+The daemon is found the way the CLI finds it: `DOCKER_HOST`, then the active docker
+context, then the socket locations used by Docker Desktop, rootless Docker, Docker Desktop
+for Linux, Colima, OrbStack, Rancher Desktop and Podman. Each candidate must answer a real
+request before it is used, because a socket file left behind by a stopped daemon is
+indistinguishable from a live one by any cheaper test.
+
+### Fixed
+
+Ports published by a container used to be labelled FOREIGN on the strength of the Docker
+daemon's own working directory, which says nothing about the container. The tooltip on a
+container row described the daemon for the same reason.
+
+The port conflict notification could still offer to terminate the Docker daemon, which
+holds every published port on the machine. It now names the container and offers to stop
+it. The rule that decides whether a container belongs to a row lives in one place, so the
+tree, the palette and the notification cannot disagree about it again.
+
+A process record with a pid but no name, which Windows produces for a process owned by
+another account and Linux produces when `/proc` is unreadable, was read as evidence that
+Docker was not the holder. Paused and restarting containers were treated as having
+released their ports. Two containers sharing a host port on different addresses were
+resolved by array order. Compose metadata was discarded entirely unless the service label
+was present, which loses the project directory that ownership depends on.
+
+### Still planned for 0.2
+
 - Probe open ports over HTTP so they can be labelled by whatever answers.
 - Find dev servers still running from projects you closed days ago.
 

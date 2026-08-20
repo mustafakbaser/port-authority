@@ -4,12 +4,14 @@ import type { SupportedPlatform } from './core/types.js';
 import { registerCommands } from './vscode/commands.js';
 import { affectsUs, currentSettings, invalidateSettingsCache } from './vscode/config.js';
 import { ConflictWatcher } from './vscode/conflictWatcher.js';
+import { DockerService } from './vscode/dockerService.js';
 import { ExpectationService } from './vscode/expectationService.js';
 import { IgnoredPortStore } from './vscode/ignoredPorts.js';
 import { Logger } from './vscode/logger.js';
 import { PortService } from './vscode/portService.js';
 import { PortStatusBar } from './vscode/statusBar.js';
 import { TerminateFlow } from './vscode/terminateFlow.js';
+import { StopContainerFlow } from './vscode/stopContainerFlow.js';
 import { PortTreeDataProvider } from './vscode/tree.js';
 
 /** Status bar polling is deliberately lazier than panel polling: it is glanceable, not live. */
@@ -50,16 +52,18 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
 
   const ports = new PortService(logger, platform);
   const expectations = new ExpectationService(logger);
+  const docker = new DockerService(logger);
   const ignored = new IgnoredPortStore(context.workspaceState);
-  const tree = new PortTreeDataProvider(ports, expectations);
+  const tree = new PortTreeDataProvider(ports, expectations, docker);
   const statusBar = new PortStatusBar();
+  const stopContainerFlow = new StopContainerFlow(docker, ports, logger);
   const terminateFlow = new TerminateFlow(
     ports,
     logger,
     (isSupportedPlatform(platform) ? platform : 'linux') as SupportedPlatform,
   );
 
-  context.subscriptions.push(ports, expectations, tree, statusBar);
+  context.subscriptions.push(ports, expectations, docker, tree, statusBar);
 
   const view = vscode.window.createTreeView('portAuthority.ports', {
     treeDataProvider: tree,
@@ -73,8 +77,14 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
   };
 
   context.subscriptions.push(
-    ports.onDidChange(syncUi),
+    // A port scan is the moment the container list matters, so the two stay in step
+    // without Docker ever being able to hold up the scan itself.
+    ports.onDidChange(() => {
+      syncUi();
+      void docker.refresh();
+    }),
     expectations.onDidChange(syncUi),
+    docker.onDidChange(syncUi),
   );
 
   // Polling is driven by who is actually looking at the data.
@@ -100,8 +110,10 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
         return;
       }
       invalidateSettingsCache();
+      docker.reset();
       applyPollers();
       void expectations.refresh();
+      void docker.refresh(true);
       void ports.refresh('config-changed', true);
       syncUi();
     }),
@@ -110,12 +122,12 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
       logger.info('Workspace trust granted; enabling workspace expectations.');
       expectations.start();
     }),
-    ...registerCommands({ ports, tree, terminateFlow, ignored, logger }),
+    ...registerCommands({ ports, tree, terminateFlow, stopContainerFlow, docker, ignored, logger }),
   );
 
   // The watcher is always installed; it reads `eaddrinuse.enabled` on every event so the
   // setting can be toggled without a reload. Its listeners cost nothing while disabled.
-  const watcher = new ConflictWatcher(ports, terminateFlow, ignored, logger);
+  const watcher = new ConflictWatcher(ports, terminateFlow, stopContainerFlow, docker, ignored, logger);
   watcher.start();
   context.subscriptions.push(watcher);
 
