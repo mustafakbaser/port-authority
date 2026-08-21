@@ -2,6 +2,23 @@
 
 Notable changes, newest first. This project follows [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.1
+
+### Changed
+
+The preview flag is gone. It was there because the container integration had only ever run
+against the daemon on the machine it was written on, and that is no longer true: CI now
+starts a real container on the Linux runner and asserts the extension attributes the
+published port to it, and separately proves the daemon is reachable over each platform's
+own transport, which is the only coverage the Windows named pipe has ever had.
+
+### Internal
+
+The `/proc` scanner was verified against a real Linux kernel for the first time, inside a
+container. Every part of it that had only been exercised with a fake file system, the
+`/proc/net/tcp` hex decoding, the inode to pid mapping through `/proc/*/fd`, the clock tick
+arithmetic in `/proc/<pid>/stat`, and the `exe` and `cwd` links, returned the right answer.
+
 ## Unreleased
 
 Planned:
