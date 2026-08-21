@@ -1,4 +1,6 @@
 import * as assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import * as net from 'node:net';
 import * as vscode from 'vscode';
 
@@ -78,6 +80,89 @@ suite('Port Authority', () => {
     }
   });
 
+  /**
+   * The container mapping is the one part of the extension that cannot be proved by unit
+   * tests alone, because it depends on what a real daemon reports. Running it here means
+   * CI verifies it on Linux as well as on the machine it was written on.
+   */
+  test('maps a published container port to the container that publishes it', async function () {
+    this.timeout(120_000);
+
+    // GitHub's Windows runner keeps Docker in Windows container mode, where a Linux image
+    // cannot run at all. The daemon answering is not enough; it has to run our image.
+    if ((await dockerDaemonType()) !== 'linux') {
+      this.skip();
+      return;
+    }
+
+    // Pick a free port so the test never collides with whatever else is running.
+    const server = net.createServer();
+    const port = await new Promise<number>((resolve, reject) => {
+      server.on('error', reject);
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        if (address && typeof address === 'object') {
+          resolve(address.port);
+        } else {
+          reject(new Error('could not reserve a port'));
+        }
+      });
+    });
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+
+    try {
+      await docker('rm', '-f', CONTAINER_NAME);
+    } catch {
+      // Nothing to clean up.
+    }
+
+    try {
+      await docker(
+        'run', '-d', '--name', CONTAINER_NAME,
+        '-p', `127.0.0.1:${port}:80`,
+        CONTAINER_IMAGE,
+        'sh', '-c', `nc -lk -p 80 -e /bin/true || sleep 300`,
+      );
+
+      const mapped = await waitFor(async () => {
+        await vscode.commands.executeCommand('portAuthority.refresh');
+        return testApi()?.getContainerPortsForTests().find((row) => row.port === port);
+      }, 60_000);
+
+      assert.ok(mapped, `port ${port} was not attributed to a container`);
+      assert.equal(mapped.container, CONTAINER_NAME);
+      assert.match(mapped.image, /^alpine/);
+    } finally {
+      try {
+        await docker('rm', '-f', CONTAINER_NAME);
+      } catch {
+        // Already gone.
+      }
+    }
+  });
+
+  /**
+   * Separate from the mapping test on purpose. This one runs wherever a daemon answers,
+   * including the Windows runner, which is the only place the named pipe transport is
+   * ever exercised.
+   */
+  test('reaches the daemon over this platform transport', async function () {
+    this.timeout(60_000);
+
+    if ((await dockerDaemonType()) === undefined) {
+      this.skip();
+      return;
+    }
+
+    const status = await waitFor(async () => {
+      await vscode.commands.executeCommand('portAuthority.refresh');
+      const current = testApi()?.getDockerStatusForTests();
+      return current?.reachable ? current : undefined;
+    }, 30_000);
+
+    assert.ok(status?.reachable, `the daemon was not reachable: ${testApi()?.getDockerStatusForTests().reason}`);
+  });
+
   test('infers the fixture workspace ports and rejects the misleading ones', async function () {
     this.timeout(30_000);
 
@@ -107,6 +192,31 @@ suite('Port Authority', () => {
 interface TestApi {
   readonly getExpectedPortsForTests: () => number[];
   readonly getListeningPortsForTests: () => number[];
+  readonly getContainerPortsForTests: () => { port: number; container: string; image: string }[];
+  readonly getDockerStatusForTests: () => { reachable: boolean; reason?: string; containers: number };
+}
+
+/** The image is tiny and already cached on GitHub's Linux runners. */
+const CONTAINER_IMAGE = 'alpine:3';
+const CONTAINER_NAME = 'port-authority-integration';
+
+// Async on purpose: a synchronous exec blocks the extension host, and VS Code reports it
+// as unresponsive, which is noise at best and a flaky failure at worst.
+const run = promisify(execFile);
+
+async function docker(...args: string[]): Promise<string> {
+  const { stdout } = await run('docker', args);
+  return stdout.trim();
+}
+
+/** Whether a daemon is reachable at all, whatever kind of containers it runs. */
+async function dockerDaemonType(): Promise<'linux' | 'windows' | undefined> {
+  try {
+    const osType = (await docker('info', '--format', '{{.OSType}}')).toLowerCase();
+    return osType === 'linux' || osType === 'windows' ? osType : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function testApi(): TestApi | undefined {
