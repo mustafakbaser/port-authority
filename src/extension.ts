@@ -34,6 +34,8 @@ export interface PortAuthorityApi {
   getListeningPortsForTests(): number[];
   /** Host port to the container publishing it, as the tree would show it. */
   getContainerPortsForTests(): { port: number; container: string; image: string }[];
+  /** Whether the daemon answered, so CI can prove the transport works on each platform. */
+  getDockerStatusForTests(): { reachable: boolean; reason?: string; containers: number };
 }
 
 /**
@@ -161,6 +163,14 @@ export function activate(context: vscode.ExtensionContext): PortAuthorityApi {
           container: row.container!.name,
           image: row.container!.image,
         })),
+    getDockerStatusForTests: () => {
+      const snapshot = docker.snapshot;
+      return {
+        reachable: snapshot.unavailable === undefined,
+        ...(snapshot.unavailable ? { reason: snapshot.unavailable.message } : {}),
+        containers: snapshot.containers.length,
+      };
+    },
   };
 }
 

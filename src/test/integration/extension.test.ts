@@ -88,7 +88,9 @@ suite('Port Authority', () => {
   test('maps a published container port to the container that publishes it', async function () {
     this.timeout(120_000);
 
-    if (!(await dockerIsAvailable())) {
+    // GitHub's Windows runner keeps Docker in Windows container mode, where a Linux image
+    // cannot run at all. The daemon answering is not enough; it has to run our image.
+    if ((await dockerDaemonType()) !== 'linux') {
       this.skip();
       return;
     }
@@ -139,6 +141,28 @@ suite('Port Authority', () => {
     }
   });
 
+  /**
+   * Separate from the mapping test on purpose. This one runs wherever a daemon answers,
+   * including the Windows runner, which is the only place the named pipe transport is
+   * ever exercised.
+   */
+  test('reaches the daemon over this platform transport', async function () {
+    this.timeout(60_000);
+
+    if ((await dockerDaemonType()) === undefined) {
+      this.skip();
+      return;
+    }
+
+    const status = await waitFor(async () => {
+      await vscode.commands.executeCommand('portAuthority.refresh');
+      const current = testApi()?.getDockerStatusForTests();
+      return current?.reachable ? current : undefined;
+    }, 30_000);
+
+    assert.ok(status?.reachable, `the daemon was not reachable: ${testApi()?.getDockerStatusForTests().reason}`);
+  });
+
   test('infers the fixture workspace ports and rejects the misleading ones', async function () {
     this.timeout(30_000);
 
@@ -169,6 +193,7 @@ interface TestApi {
   readonly getExpectedPortsForTests: () => number[];
   readonly getListeningPortsForTests: () => number[];
   readonly getContainerPortsForTests: () => { port: number; container: string; image: string }[];
+  readonly getDockerStatusForTests: () => { reachable: boolean; reason?: string; containers: number };
 }
 
 /** The image is tiny and already cached on GitHub's Linux runners. */
@@ -184,12 +209,13 @@ async function docker(...args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-async function dockerIsAvailable(): Promise<boolean> {
+/** Whether a daemon is reachable at all, whatever kind of containers it runs. */
+async function dockerDaemonType(): Promise<'linux' | 'windows' | undefined> {
   try {
-    await docker('info', '--format', '{{.ServerVersion}}');
-    return true;
+    const osType = (await docker('info', '--format', '{{.OSType}}')).toLowerCase();
+    return osType === 'linux' || osType === 'windows' ? osType : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
